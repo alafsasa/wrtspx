@@ -1,2 +1,5 @@
 .venv/
 mediamtx
+build/
+dist/
+main.spec
