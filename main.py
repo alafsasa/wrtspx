@@ -344,6 +344,8 @@ class MainWindow(QMainWindow):
             #testbtn.clicked.connect(start_mediamtx)
             edittext = QPlainTextEdit()
             edittext.setReadOnly(True)
+            edittext.setCenterOnScroll(True)
+            #edittext.verticalScrollBar().setValue(edittext.verticalScrollBar().maximum())
             layout.addWidget(edittext, 15, 0, 1, 6)
 
             def pmessage(msg):
@@ -412,23 +414,16 @@ class MainWindow(QMainWindow):
                     self.ffmpegp.readyReadStandardError.connect(handle_ffmpeg_stderr)
                     self.ffmpegp.stateChanged.connect(handle_ffmpeg_state)
                     self.ffmpegp.finished.connect(ffmpeg_finished)
-                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-pix_fmt", "yuv420p", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/webcam"])
+                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/webcam"])
 
             edittextffmpeg = QPlainTextEdit()
             edittextffmpeg.setReadOnly(True)
+            #edittextffmpeg.setCenterOnScroll(True)
+            edittextffmpeg.verticalScrollBar().setValue(edittextffmpeg.verticalScrollBar().maximum())
             layout.addWidget(edittextffmpeg, 15, 6, 1, 6)
 
             #show four QplainTextEdit widget inside a QBoxLayout to show the output of the ffmpeg command for each stream added to the stream settings list. The output should show the ffmpeg command being run for each stream and any errors or output from the command. The QPlainTextEdit widgets should only be visible when there are streams in the stream settings list.
             ffmpegbox = QVBoxLayout()
-
-            def add_xedittextffmpeg(selected_camera, selected_frame_rate, selected_resolution):
-                labelx = QLabel(f"Camera: {selected_camera}, Frame Rate: {selected_frame_rate}, Resolution: {selected_resolution}")
-                labelx.setStyleSheet("font-weight: bold; font-size: 11px;")
-                ffmpegbox.addWidget(labelx)
-                edittext = QPlainTextEdit()
-                edittext.setReadOnly(True)
-                ffmpegbox.addWidget(edittext)
-            
             ffmpegbox_container = QWidget()
             ffmpegbox_container.setLayout(ffmpegbox)
             ffmpegscrollarea = QScrollArea()
@@ -470,6 +465,8 @@ class MainWindow(QMainWindow):
                     ffmpegbox.addWidget(labelx)
                     edittext = QPlainTextEdit()
                     edittext.setReadOnly(True)
+                    #edittext.setCenterOnScroll(True)
+                    edittext.verticalScrollBar().setValue(edittext.verticalScrollBar().maximum())
                     ffmpegbox.addWidget(edittext)
                     selected_ip = ""
                     if local_ip_checkbox.isChecked():
@@ -487,7 +484,7 @@ class MainWindow(QMainWindow):
                     p.stateChanged.connect(lambda state, p=p, edittext=edittext: handle_multiple_ffmpeg_state(state, p, edittext))
                     p.finished.connect(make_ffmpeg_finished_callback(stream['camera'], edittext))
                     
-                    p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-pix_fmt", "yuv420p", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/webcam{stream_settings.index(stream)+1}"])
+                    p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/webcam{stream_settings.index(stream)+1}"])
 
             def handle_multiple_ffmpeg_stderr(p, edittext):
                 error_output = p.readAllStandardError().data().decode()
@@ -641,6 +638,28 @@ class MainWindow(QMainWindow):
             local_ip_checkbox.stateChanged.connect(update_webrtc_label)
             public_ip_checkbox.stateChanged.connect(update_webrtc_label)
             layout.addWidget(webrtc_label, 17, 0, 1, 11, alignment=Qt.AlignmentFlag.AlignLeft)
+
+            #add reset button to clear the stream settings list and reset all selections
+            reset_button = QPushButton("Reset Settings")
+            reset_button.setStyleSheet("font-weight: bold; background-color: orange; color: white;")
+            layout.addWidget(reset_button, 18, 0, 1, 1)
+
+            def reset_settings():
+                combo.setCurrentIndex(0)
+                framerate_combo.setCurrentIndex(0)
+                resolution_combo.setCurrentIndex(0)
+                local_ip_checkbox.setChecked(False)
+                public_ip_checkbox.setChecked(False)
+                stream_settings.clear()
+                update_stream_list()
+                #toggle_edittextffmpeg()
+                #clear mediamtx and ffmpeg output text boxes
+                edittext.clear()
+                edittextffmpeg.clear()
+                update_rtsp_label()
+                update_webrtc_label()
+
+            reset_button.clicked.connect(reset_settings)
 
             #===========================================================
             #END OF WINDOWS-SPECIFIC CODE, START OF LINUX-SPECIFIC CODE
