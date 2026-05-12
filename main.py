@@ -1,8 +1,9 @@
+import json
 import sys
 from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QScrollArea, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
 from PySide6.QtCore import Qt, QProcess
 import platform
-os = platform.system()
+ostype = platform.system()
 import subprocess
 import cv2
 import socket
@@ -10,6 +11,8 @@ from qtpy import QtCore, QtWidgets
 from qtpyTerminal import qtpyTerminal
 import psutil
 from cv2_enumerate_cameras import enumerate_cameras
+import os
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -22,13 +25,13 @@ class MainWindow(QMainWindow):
         label1.setStyleSheet("font-weight: bold;")
         layout.addWidget(label1, 0, 0, 1, 6)
         #check operating system
-        if os == "Windows":
+        if ostype == "Windows":
             #===========================================================
             #START OF WINDOWS-SPECIFIC CODE
             #===========================================================
             print("Running on Windows")
             #add label for system os and version
-            label2 = QLabel(f"System OS: {os} {platform.release()}")
+            label2 = QLabel(f"System OS: {ostype} {platform.release()}")
             layout.addWidget(label2, 0, 6, 1, 6)
             #enumerate cameras using cv2_enumerate_cameras
             cameras = enumerate_cameras()
@@ -337,7 +340,7 @@ class MainWindow(QMainWindow):
                 self.p.stateChanged.connect(handle_state)
                 self.p.finished.connect(process_finished)
                 #self.p.start("ping", ["google.com"])
-                self.p.start("./mediamtx/mediamtx.exe", ["./mediamtx/mediamtx.yml"])
+                self.p.start("mediamtx.exe", ["mediamtx.yml"])
                 #wait for 500 milliseconds to allow mediamtx to start before starting ffmpeg
                 QtCore.QTimer.singleShot(500, check_mediamtx_process)
 
@@ -414,7 +417,7 @@ class MainWindow(QMainWindow):
                     self.ffmpegp.readyReadStandardError.connect(handle_ffmpeg_stderr)
                     self.ffmpegp.stateChanged.connect(handle_ffmpeg_state)
                     self.ffmpegp.finished.connect(ffmpeg_finished)
-                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/webcam"])
+                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{selected_camera.replace(' ', '_')}"])
 
             edittextffmpeg = QPlainTextEdit()
             edittextffmpeg.setReadOnly(True)
@@ -484,7 +487,7 @@ class MainWindow(QMainWindow):
                     p.stateChanged.connect(lambda state, p=p, edittext=edittext: handle_multiple_ffmpeg_state(state, p, edittext))
                     p.finished.connect(make_ffmpeg_finished_callback(stream['camera'], edittext))
                     
-                    p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/webcam{stream_settings.index(stream)+1}"])
+                    p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{stream['camera'].replace(' ', '_')}"])
 
             def handle_multiple_ffmpeg_stderr(p, edittext):
                 error_output = p.readAllStandardError().data().decode()
@@ -509,17 +512,17 @@ class MainWindow(QMainWindow):
             #stop mediamtx by finding the process and killing it
             def stop_mediamtx():
                 stopped = False
-                if os == "Linux":
+                if ostype == "Linux":
                     for proc in psutil.process_iter(['pid', 'name']):
                         if proc.info['name'] == "mediamtx":
                             proc.kill()
                             stopped = True
                     #console.stop()
                     #console.close()
-                elif os == "Windows":
+                elif ostype == "Windows":
                     subprocess.call("taskkill /f /im mediamtx.exe", shell=True)
                     stopped = True
-                elif os == "Darwin":
+                elif ostype == "Darwin":
                     subprocess.call("pkill mediamtx", shell=True)
                     stopped = True
 
@@ -528,13 +531,13 @@ class MainWindow(QMainWindow):
 
             #stop ffmpeg by finding the process and killing it
             def stop_ffmpeg():
-                if os == "Linux":
+                if ostype == "Linux":
                     for proc in psutil.process_iter(['pid', 'name']):
                         if proc.info['name'] == "ffmpeg":
                             proc.terminate()
-                elif os == "Windows":
+                elif ostype == "Windows":
                     subprocess.call("taskkill /f /im ffmpeg.exe", shell=True)
-                elif os == "Darwin":
+                elif ostype == "Darwin":
                     subprocess.call("pkill ffmpeg", shell=True)
 
             #stop both mediamtx and ffmpeg when the main window is closed
@@ -546,7 +549,8 @@ class MainWindow(QMainWindow):
             quit_button.clicked.connect(lambda: handle_close_event())
 
             #show rtsp link in a label at the bottom of the window
-            rtsp_label = QLabel("RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/webcam")
+            selected_camera = combo.currentText() if combo.currentText() else "webcam"
+            rtsp_label = QLabel(f"RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/{selected_camera.replace(' ', '_')}")
             rtsp_urls = []
             
             def copy_to_clipboard(url):
@@ -559,28 +563,29 @@ class MainWindow(QMainWindow):
                     selected_ip = local_ip
                 elif public_ip_checkbox.isChecked():
                     selected_ip = localhost_ip
+                selected_camera = combo.currentText()
 
                 rtsp_urls.clear()
                 if stream_settings and selected_ip:
                     urls = []
-                    for idx in range(1, len(stream_settings) + 1):
+                    for camera in stream_settings:
                         if local_ip_checkbox.isChecked():
-                            url = f"rtsp://{local_ip}:8554/webcam{idx}"
+                            url = f"rtsp://{local_ip}:8554/{camera['camera'].replace(' ', '_')}"
                         elif public_ip_checkbox.isChecked():
-                            url = f"rtsp://{localhost_ip}:8554/webcam{idx}"
+                            url = f"rtsp://{localhost_ip}:8554/{camera['camera'].replace(' ', '_')}"
                         urls.append(url)
                         rtsp_urls.append(url)
                     rtsp_label.setText(f"RTSP Stream URLs: {', '.join(urls)} [Click to copy]")
                 elif selected_ip and local_ip_checkbox.isChecked():
-                    url = f"rtsp://{local_ip}:8554/webcam"
+                    url = f"rtsp://{local_ip}:8554/{selected_camera.replace(' ', '_')}"
                     rtsp_urls.append(url)
                     rtsp_label.setText(f"RTSP Stream URL: {url} [Click to copy]")
                 elif selected_ip and public_ip_checkbox.isChecked():
-                    url = f"rtsp://{localhost_ip}:8554/webcam"
+                    url = f"rtsp://{localhost_ip}:8554/{selected_camera.replace(' ', '_')}"
                     rtsp_urls.append(url)
                     rtsp_label.setText(f"RTSP Stream URL: {url} [Click to copy]")
                 else:
-                    rtsp_label.setText("RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/webcam")
+                    rtsp_label.setText(f"RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/{selected_camera.replace(' ', '_')}")
             
             def on_rtsp_label_clicked():
                 if rtsp_urls:
@@ -594,7 +599,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(rtsp_label, 16, 0, 1, 11, alignment=Qt.AlignmentFlag.AlignLeft)
 
             #show webrtc link in a label at the bottom of the window
-            webrtc_label = QLabel("Browser Stream URL: http://<IP_ADDRESS>:8889/webcam")
+            webrtc_label = QLabel(f"Browser Stream URL: http://<IP_ADDRESS>:8889/{selected_camera.replace(' ', '_')}")
             webrtc_urls = []
 
             def copy_webrtc_to_clipboard(url):
@@ -607,28 +612,33 @@ class MainWindow(QMainWindow):
                     selected_ip = local_ip
                 elif public_ip_checkbox.isChecked():
                     selected_ip = localhost_ip
+                selected_camera = combo.currentText()
 
                 webrtc_urls.clear()
                 if stream_settings and selected_ip:
                     urls = []
-                    for idx in range(1, len(stream_settings) + 1):
+                    for camera in stream_settings:
                         if local_ip_checkbox.isChecked():
-                            url = f"http://{local_ip}:8889/webcam{idx}"
+                            url = f"http://{local_ip}:8889/{camera['camera'].replace(' ', '_')}"
                         elif public_ip_checkbox.isChecked():
-                            url = f"http://{localhost_ip}:8889/webcam{idx}"
+                            url = f"http://{localhost_ip}:8889/{camera['camera'].replace(' ', '_')}"
                         urls.append(url)
                         webrtc_urls.append(url)
                     webrtc_label.setText(f"Browser Stream URLs: {', '.join(urls)} [Click to copy]")
                 elif selected_ip and local_ip_checkbox.isChecked():
-                    url = f"http://{local_ip}:8889/webcam"
+                    print("A")
+                    url = f"http://{local_ip}:8889/{selected_camera.replace(' ', '_')}"
                     webrtc_urls.append(url)
                     webrtc_label.setText(f"Browser Stream URL: {url} [Click to copy]")
                 elif selected_ip and public_ip_checkbox.isChecked():
-                    url = f"http://{localhost_ip}:8889/webcam"
+                    print("B")
+                    print(selected_camera)
+                    url = f"http://{localhost_ip}:8889/{selected_camera.replace(' ', '_')}"
                     webrtc_urls.append(url)
                     webrtc_label.setText(f"Browser Stream URL: {url} [Click to copy]")
                 else:
-                    webrtc_label.setText("Browser Stream URL: http://<IP_ADDRESS>:8889/webcam")
+                    print("C")
+                    webrtc_label.setText(f"Browser Stream URL: http://<IP_ADDRESS>:8889/{selected_camera.replace(' ', '_')}")
             def on_webrtc_label_clicked():
                 if webrtc_urls:
                     for url in webrtc_urls:
@@ -658,20 +668,87 @@ class MainWindow(QMainWindow):
                 edittextffmpeg.clear()
                 update_rtsp_label()
                 update_webrtc_label()
+                #reset ffmpegbox by removing all widgets from the layout
+                for i in reversed(range(ffmpegbox.count())):
+                    ffmpegbox.itemAt(i).widget().setParent(None)
+                
+                edittextffmpeg.setVisible(True)
+                ffmpegbox.addWidget(edittextffmpeg)
 
             reset_button.clicked.connect(reset_settings)
+
+            #save settings button to save the current stream settings to a json file
+            save_settings_button = QPushButton("Save Settings")
+            save_settings_button.setStyleSheet("font-weight: bold; background-color: purple; color: white;")
+            layout.addWidget(save_settings_button, 18, 1, 1, 1)
+            def save_settings():
+                settings = {
+                    "stream_settings": stream_settings,
+                    "selected_ip": local_ip if local_ip_checkbox.isChecked() else localhost_ip if public_ip_checkbox.isChecked() else "",
+                    "selected_frame_rate": framerate_combo.currentText(),
+                    "selected_resolution": resolution_combo.currentText()
+                }
+
+                with open("stream_settings.json", "w") as f:
+                    json.dump(settings, f)
+                dlg = QDialog(self)
+                dlg.setWindowTitle("Settings Saved")
+                dlg.setMinimumSize(400, 200)
+                layoutd = QVBoxLayout()
+                label = QLabel("Stream settings have been saved to stream_settings.json")
+                layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                dlg.setLayout(layoutd)
+                dlg.exec()
+
+
+            save_settings_button.clicked.connect(save_settings)
+
+            #on application start, check if stream_settings.json file exists and if it does, load the settings and populate the stream settings list and update the UI accordingly
+            def load_settings():
+                if os.path.exists("stream_settings.json"):
+                    with open("stream_settings.json", "r") as f:
+                        settings = json.load(f)
+                    loaded_stream_settings = settings.get("stream_settings", [])
+                    stream_settings.extend(loaded_stream_settings)
+                    selected_ip = settings.get("selected_ip", "")
+                    selected_frame_rate = settings.get("selected_frame_rate", "")
+                    selected_resolution = settings.get("selected_resolution", "")
+
+                    if selected_ip == local_ip:
+                        local_ip_checkbox.setChecked(True)
+                    elif selected_ip == localhost_ip:
+                        public_ip_checkbox.setChecked(True)
+
+                    if selected_frame_rate in [framerate_combo.itemText(i) for i in range(framerate_combo.count())]:
+                        framerate_combo.setCurrentText(selected_frame_rate)
+
+                    if selected_resolution in [resolution_combo.itemText(i) for i in range(resolution_combo.count())]:
+                        resolution_combo.setCurrentText(selected_resolution)
+
+                    update_stream_list()
+                    #toggle_edittextffmpeg()
+                    update_selected_settings()
+                    update_rtsp_label()
+                    update_webrtc_label()
+
+
+            load_settings()
+
+
+
+
 
             #===========================================================
             #END OF WINDOWS-SPECIFIC CODE, START OF LINUX-SPECIFIC CODE
             #===========================================================
 
-        elif os == "Linux":
+        elif ostype == "Linux":
             #============================================================
             #START OF LINUX-SPECIFIC CODE
             #============================================================
             print("Running on Linux")
             #add label for system os and version
-            label2 = QLabel(f"System OS: {os} {platform.release()}")
+            label2 = QLabel(f"System OS: {ostype} {platform.release()}")
             layout.addWidget(label2, 0, 6, 1, 6)
         #query available cameras using v4l2-ctl command and add them to a combo box showing camera name and device path
             cameras = subprocess.check_output("v4l2-ctl --list-devices", shell=True).decode().split("\n\n")
