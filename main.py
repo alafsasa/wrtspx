@@ -1,6 +1,6 @@
 import json
 import sys
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QScrollArea, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
 from PySide6.QtCore import Qt, QProcess
 import platform
 ostype = platform.system()
@@ -13,6 +13,35 @@ import psutil
 from cv2_enumerate_cameras import enumerate_cameras
 import os
 
+#table model
+class TableModel(QtCore.QAbstractTableModel):
+    def __init__(self, data):
+        super(TableModel, self).__init__()
+        self._data = data
+
+    def data(self, index, role):
+        if role == Qt.DisplayRole:
+            return self._data[index.row()][index.column()]
+        if role == Qt.BackgroundRole:
+            if index.row() == 0:
+                from PySide6.QtGui import QColor
+                return QColor("lightgray")
+            elif index.row() > 0 and index.column() in [1, 2]:
+                from PySide6.QtGui import QColor
+                return QColor("lightblue")
+        if role == Qt.FontRole:
+            from PySide6.QtGui import QFont
+            font = QFont()
+            if index.row() == 0:
+                font.setBold(True)
+            return font
+
+
+    def rowCount(self, index):
+        return len(self._data)
+
+    def columnCount(self, index):
+        return len(self._data[0])
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -111,22 +140,28 @@ class MainWindow(QMainWindow):
             show_video_button = QPushButton("Preview Selected Camera")
             #show_video_button.setStyleSheet("font-weight: bold; background-color: blue; color: white;")
             show_video_button.clicked.connect(show_video)
-            layout.addWidget(show_video_button, 2, 9, 1, 2)
+            layout.addWidget(show_video_button, 6, 0, 1, 2)
             #use selected camera, framerate, and the resolution to append to a list of settings to be used in the ffmpeg command when starting multiple streams
             addcamera_button = QPushButton("Add Camera to Stream List")
-            layout.addWidget(addcamera_button, 2, 11, 1, 1)
+            addcamera_button.setStyleSheet("font-weight: bold; background-color: orange; color: white;")
+            layout.addWidget(addcamera_button, 6, 2, 1, 1)
 
             stream_settings = []
             def add_camera_to_stream_list():
                 selected_camera = combo.currentText()
                 selected_frame_rate = framerate_combo.currentText()
                 selected_resolution = resolution_combo.currentText()
-                if selected_camera == "" or selected_frame_rate == "" or selected_resolution == "":
+                selected_ip = ""
+                if local_ip_checkbox.isChecked():
+                    selected_ip = local_ip
+                elif public_ip_checkbox.isChecked():
+                    selected_ip = localhost_ip
+                if selected_camera == "" or selected_frame_rate == "" or selected_resolution == "" or selected_ip == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
                     dlg.setMinimumSize(400, 200)
                     layoutd = QVBoxLayout()
-                    label = QLabel("Please select a camera, frame rate, and resolution before adding to the stream list.")
+                    label = QLabel("Please select a camera, frame rate, resolution, and IP address before adding to the stream list.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
                     dlg.setLayout(layoutd)
                     dlg.exec()
@@ -134,21 +169,16 @@ class MainWindow(QMainWindow):
                 new_setting = {
                     "camera": selected_camera,
                     "frame_rate": selected_frame_rate,
-                    "resolution": selected_resolution
+                    "resolution": selected_resolution,
+                    "ip": selected_ip
                 }
-                if new_setting not in stream_settings:
+                if new_setting["camera"] not in [s["camera"] for s in stream_settings]:
                     stream_settings.append(new_setting)
                 else:
                     return
-                print(f"Added to stream list: Camera: {selected_camera}, Frame Rate: {selected_frame_rate}, Resolution: {selected_resolution}")
+                print(f"Added to stream list: Camera: {selected_camera}, Frame Rate: {selected_frame_rate}, Resolution: {selected_resolution}, IP: {selected_ip}")
                 toggle_edittextffmpeg()
             addcamera_button.clicked.connect(add_camera_to_stream_list)
-
-            #create horizontal line separator
-            line = QtWidgets.QFrame()
-            line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-            line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-            layout.addWidget(line, 5, 0, 1, 11)
 
             #add two checkboxes to select either localhost ip or the local network ip
             def get_local_ip():
@@ -164,7 +194,7 @@ class MainWindow(QMainWindow):
             local_ip = get_local_ip()
             localhost_ip = "127.0.0.1"
             winlabel4 = QLabel("Select IP Address:")
-            layout.addWidget(winlabel4, 6, 0, 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
+            layout.addWidget(winlabel4, 5, 0, 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
             #add checkbox to toggle between local ip and public ip
             local_ip_checkbox = QCheckBox(f"Local Network IP ({local_ip})")
             public_ip_checkbox = QCheckBox(f"Localhost IP ({localhost_ip})")
@@ -183,25 +213,29 @@ class MainWindow(QMainWindow):
 
             local_ip_checkbox.stateChanged.connect(on_local_ip_change)
             public_ip_checkbox.stateChanged.connect(on_public_ip_change)
-            layout.addWidget(local_ip_checkbox, 6, 1, 1, 1)
-            layout.addWidget(public_ip_checkbox, 6, 2, 1, 1)
+            layout.addWidget(local_ip_checkbox, 5, 1, 1, 1)
+            layout.addWidget(public_ip_checkbox, 5, 4, 1, 1)
 
             #add horizontal line separator
             line2 = QtWidgets.QFrame()
             line2.setFrameShape(QtWidgets.QFrame.Shape.HLine)
             line2.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-            layout.addWidget(line2, 8, 0, 1, 11)
+            layout.addWidget(line2, 8, 0, 1, 12)
 
             #show selected camera and selected ip in a label
             winlabel5 = QLabel("Selected Settings:")
-            layout.addWidget(winlabel5, 9, 0, 1, 11, alignment=Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(winlabel5, 9, 0, 1, 12, alignment=Qt.AlignmentFlag.AlignLeft)
             wlabel6 = QLabel("Camera: ")
+            wlabel6.setStyleSheet("font-weight: bold; background-color: lightgray;")
             layout.addWidget(wlabel6, 10, 0, 1, 3)
             wlabel7 = QLabel("IP: ")
+            wlabel7.setStyleSheet("background-color: lightgray;")
             layout.addWidget(wlabel7, 10, 3, 1, 3)
             wlabel8 = QLabel("FPS: ")
+            wlabel8.setStyleSheet("background-color: lightgray;")
             layout.addWidget(wlabel8, 10, 6, 1, 3)
             wlabel9 = QLabel("Resolution: ")
+            wlabel9.setStyleSheet("background-color: lightgray;")
             layout.addWidget(wlabel9, 10, 9, 1, 3)
 
             def update_selected_settings():
@@ -228,7 +262,7 @@ class MainWindow(QMainWindow):
             line3.setFrameShape(QtWidgets.QFrame.Shape.HLine)
             line3.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
             line3.setVisible(len(stream_settings) > 0)
-            layout.addWidget(line3, 11, 0, 1, 11)
+            layout.addWidget(line3, 11, 0, 1, 12)
 
             #show camera info added to the stream_settings array in scrollable area with a label showing the camera name, frame rate, and resolution for each item in the stream settings list
             scroll_area = QScrollArea()
@@ -237,16 +271,58 @@ class MainWindow(QMainWindow):
             scroll_layout = QVBoxLayout(scroll_content)
             scroll_area.setWidget(scroll_content)
             scroll_area.setVisible(len(stream_settings) > 0)
-            layout.addWidget(scroll_area, 12, 0, 1, 11)
+            layout.addWidget(scroll_area, 12, 0, 1, 12)
+
+            stream_settings_table = QTableView()
+            #layout.addWidget(stream_settings_table, 
+            # 12, 0, 1, 11)
 
             def update_stream_list():
                 scroll_area.setVisible(len(stream_settings) > 0)
                 for i in reversed(range(scroll_layout.count())):
                     scroll_layout.itemAt(i).widget().setParent(None)
+                tempcamera_data = []
+                selected_ip = ""
+                if local_ip_checkbox.isChecked():
+                    selected_ip = local_ip
+                elif public_ip_checkbox.isChecked():
+                    selected_ip = localhost_ip
+
                 for idx, stream in enumerate(stream_settings, 1):
-                    label = QLabel(f"{idx}. Camera: {stream['camera']}, Frame Rate: {stream['frame_rate']}, Resolution: {stream['resolution']}")
-                    scroll_area.setStyleSheet("background-color: lightgray;")
-                    scroll_layout.addWidget(label)
+                    #label = QLabel(f"{idx}. Camera: {stream['camera']}, Frame Rate: {stream['frame_rate']}, Resolution: {stream['resolution']}")
+                    #scroll_area.setStyleSheet("background-color: lightgray;")
+                    #scroll_layout.addWidget(label)
+                    #data = [[f"Camera: {stream['camera']}"], [f"Frame Rate: {stream['frame_rate']}"], [f"Resolution: {stream['resolution']}"]]
+
+                    tempcamera_data.append([
+                        f"Camera: {stream['camera']} Frame Rate: ({stream['frame_rate']} FPS, Resolution: {stream['resolution']})",
+                        f"rtsp://{selected_ip}:8554/{stream['camera'].strip().replace(' ', '_')}",
+                        f"http://{selected_ip}:8889/{stream['camera'].strip().replace(' ', '_')}"
+                    ])
+
+                data = [
+                  ["Camera Config", "RTSP URL [Click to Copy]", "Browser URL [Click to Copy]"],
+                ] + tempcamera_data
+                model = TableModel(data)
+                stream_settings_table.setModel(model)
+                stream_settings_table.setStyleSheet("QTableView { background-color: lightgray;} QHeaderView::section { background-color: gray; color: white; font-weight: bold; }")
+                stream_settings_table.horizontalHeader().setStretchLastSection(False)
+                stream_settings_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)  # ResizeMode.Stretch
+                stream_settings_table.mousePressEvent = lambda event: on_stream_settings_table_clicked(event, stream_settings_table, tempcamera_data)
+                stream_settings_table.setCursor(Qt.CursorShape.PointingHandCursor)
+
+
+                def on_stream_settings_table_clicked(event, table, data):
+                    index = table.indexAt(event.pos())
+                    if index.isValid():
+                        row = index.row()
+                        column = index.column()
+                        if column in [1, 2] and row != 0:
+                            url = data[row - 1][column]
+                            clipboard = QApplication.clipboard()
+                            clipboard.setText(url)
+
+                scroll_layout.addWidget(stream_settings_table)
 
             addcamera_button.clicked.connect(lambda: [add_camera_to_stream_list(), update_stream_list()])
 
@@ -550,7 +626,7 @@ class MainWindow(QMainWindow):
 
             #show rtsp link in a label at the bottom of the window
             selected_camera = combo.currentText() if combo.currentText() else "webcam"
-            rtsp_label = QLabel(f"RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/{selected_camera.replace(' ', '_')}")
+            rtsp_label = QLabel(f"RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/{selected_camera.strip().replace(' ', '_')}")
             rtsp_urls = []
             
             def copy_to_clipboard(url):
@@ -570,22 +646,22 @@ class MainWindow(QMainWindow):
                     urls = []
                     for camera in stream_settings:
                         if local_ip_checkbox.isChecked():
-                            url = f"rtsp://{local_ip}:8554/{camera['camera'].replace(' ', '_')}"
+                            url = f"rtsp://{local_ip}:8554/{camera['camera'].strip().replace(' ', '_')}"
                         elif public_ip_checkbox.isChecked():
-                            url = f"rtsp://{localhost_ip}:8554/{camera['camera'].replace(' ', '_')}"
+                            url = f"rtsp://{localhost_ip}:8554/{camera['camera'].strip().replace(' ', '_')}"
                         urls.append(url)
                         rtsp_urls.append(url)
                     rtsp_label.setText(f"RTSP Stream URLs: {', '.join(urls)} [Click to copy]")
                 elif selected_ip and local_ip_checkbox.isChecked():
-                    url = f"rtsp://{local_ip}:8554/{selected_camera.replace(' ', '_')}"
+                    url = f"rtsp://{local_ip}:8554/{selected_camera.strip().replace(' ', '_')}"
                     rtsp_urls.append(url)
                     rtsp_label.setText(f"RTSP Stream URL: {url} [Click to copy]")
                 elif selected_ip and public_ip_checkbox.isChecked():
-                    url = f"rtsp://{localhost_ip}:8554/{selected_camera.replace(' ', '_')}"
+                    url = f"rtsp://{localhost_ip}:8554/{selected_camera.strip().replace(' ', '_')}"
                     rtsp_urls.append(url)
                     rtsp_label.setText(f"RTSP Stream URL: {url} [Click to copy]")
                 else:
-                    rtsp_label.setText(f"RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/{selected_camera.replace(' ', '_')}")
+                    rtsp_label.setText(f"RTSP Stream URL: rtsp://<IP_ADDRESS>:8554/{selected_camera.strip().replace(' ', '_')}")
             
             def on_rtsp_label_clicked():
                 if rtsp_urls:
@@ -596,10 +672,11 @@ class MainWindow(QMainWindow):
             rtsp_label.mousePressEvent = lambda event: on_rtsp_label_clicked()
             local_ip_checkbox.stateChanged.connect(update_rtsp_label)
             public_ip_checkbox.stateChanged.connect(update_rtsp_label)
+            rtsp_label.setVisible(False)
             layout.addWidget(rtsp_label, 16, 0, 1, 11, alignment=Qt.AlignmentFlag.AlignLeft)
 
             #show webrtc link in a label at the bottom of the window
-            webrtc_label = QLabel(f"Browser Stream URL: http://<IP_ADDRESS>:8889/{selected_camera.replace(' ', '_')}")
+            webrtc_label = QLabel(f"Browser Stream URL: http://<IP_ADDRESS>:8889/{selected_camera.strip().replace(' ', '_')}")
             webrtc_urls = []
 
             def copy_webrtc_to_clipboard(url):
@@ -619,26 +696,22 @@ class MainWindow(QMainWindow):
                     urls = []
                     for camera in stream_settings:
                         if local_ip_checkbox.isChecked():
-                            url = f"http://{local_ip}:8889/{camera['camera'].replace(' ', '_')}"
+                            url = f"http://{local_ip}:8889/{camera['camera'].strip().replace(' ', '_')}"
                         elif public_ip_checkbox.isChecked():
-                            url = f"http://{localhost_ip}:8889/{camera['camera'].replace(' ', '_')}"
+                            url = f"http://{localhost_ip}:8889/{camera['camera'].strip().replace(' ', '_')}"
                         urls.append(url)
                         webrtc_urls.append(url)
                     webrtc_label.setText(f"Browser Stream URLs: {', '.join(urls)} [Click to copy]")
                 elif selected_ip and local_ip_checkbox.isChecked():
-                    print("A")
-                    url = f"http://{local_ip}:8889/{selected_camera.replace(' ', '_')}"
+                    url = f"http://{local_ip}:8889/{selected_camera.strip().replace(' ', '_')}"
                     webrtc_urls.append(url)
                     webrtc_label.setText(f"Browser Stream URL: {url} [Click to copy]")
                 elif selected_ip and public_ip_checkbox.isChecked():
-                    print("B")
-                    print(selected_camera)
-                    url = f"http://{localhost_ip}:8889/{selected_camera.replace(' ', '_')}"
+                    url = f"http://{localhost_ip}:8889/{selected_camera.strip().replace(' ', '_')}"
                     webrtc_urls.append(url)
                     webrtc_label.setText(f"Browser Stream URL: {url} [Click to copy]")
                 else:
-                    print("C")
-                    webrtc_label.setText(f"Browser Stream URL: http://<IP_ADDRESS>:8889/{selected_camera.replace(' ', '_')}")
+                    webrtc_label.setText(f"Browser Stream URL: http://<IP_ADDRESS>:8889/{selected_camera.strip().replace(' ', '_')}")
             def on_webrtc_label_clicked():
                 if webrtc_urls:
                     for url in webrtc_urls:
@@ -647,6 +720,7 @@ class MainWindow(QMainWindow):
             webrtc_label.mousePressEvent = lambda event: on_webrtc_label_clicked()
             local_ip_checkbox.stateChanged.connect(update_webrtc_label)
             public_ip_checkbox.stateChanged.connect(update_webrtc_label)
+            webrtc_label.setVisible(False)
             layout.addWidget(webrtc_label, 17, 0, 1, 11, alignment=Qt.AlignmentFlag.AlignLeft)
 
             #add reset button to clear the stream settings list and reset all selections
@@ -710,9 +784,14 @@ class MainWindow(QMainWindow):
                         settings = json.load(f)
                     loaded_stream_settings = settings.get("stream_settings", [])
                     stream_settings.extend(loaded_stream_settings)
+                    print(f"Loaded stream settings: {stream_settings}")
+                    selected_camera = stream_settings[0]['camera'] if stream_settings else ""
                     selected_ip = settings.get("selected_ip", "")
                     selected_frame_rate = settings.get("selected_frame_rate", "")
                     selected_resolution = settings.get("selected_resolution", "")
+
+                    if selected_camera in [combo.itemText(i) for i in range(combo.count())]:
+                        combo.setCurrentText(selected_camera)
 
                     if selected_ip == local_ip:
                         local_ip_checkbox.setChecked(True)
@@ -733,9 +812,6 @@ class MainWindow(QMainWindow):
 
 
             load_settings()
-
-
-
 
 
             #===========================================================
