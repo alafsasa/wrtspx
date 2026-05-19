@@ -3,3 +3,6 @@ mediamtx
 build/
 dist/
 main.spec
+mediamtx.exe
+mediamtx.yml
+LICENSE

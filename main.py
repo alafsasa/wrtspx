@@ -1,7 +1,8 @@
 import json
 import sys
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
-from PySide6.QtCore import Qt, QProcess
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QMainWindow, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
+from PySide6.QtCore import QTimer, Qt, QProcess
+from PySide6 import QtGui
 import platform
 ostype = platform.system()
 import subprocess
@@ -15,26 +16,30 @@ import os
 
 #table model
 class TableModel(QtCore.QAbstractTableModel):
-    def __init__(self, data):
+    def __init__(self, data, header, parent=None, *args):
         super(TableModel, self).__init__()
         self._data = data
+        self._header = header
+        cols = len(data[0]) if data else 0
+        self._backgrounds = [[None] * cols for _ in range(len(data))]  # Initialize background colors for each cell
 
     def data(self, index, role):
         if role == Qt.DisplayRole:
             return self._data[index.row()][index.column()]
-        if role == Qt.BackgroundRole:
-            if index.row() == 0:
-                from PySide6.QtGui import QColor
-                return QColor("lightgray")
-            elif index.row() > 0 and index.column() in [1, 2]:
-                from PySide6.QtGui import QColor
-                return QColor("lightblue")
         if role == Qt.FontRole:
             from PySide6.QtGui import QFont
             font = QFont()
-            if index.row() == 0:
+            if index.row() >= 0:
                 font.setBold(True)
             return font
+        if role == Qt.BackgroundRole:
+            return self._backgrounds[index.row()][index.column()]
+        
+    def setData(self, index, value, /, role = ...):
+        if role == Qt.BackgroundRole:
+            self._backgrounds[index.row()][index.column()] = value
+            self.dataChanged.emit(index, index, [role])
+            return True
 
 
     def rowCount(self, index):
@@ -42,6 +47,11 @@ class TableModel(QtCore.QAbstractTableModel):
 
     def columnCount(self, index):
         return len(self._data[0])
+    
+    def headerData(self, section, orientation, role):
+        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
+            return self._header[section]
+        return super().headerData(section, orientation, role)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -147,6 +157,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(addcamera_button, 6, 2, 1, 1)
 
             stream_settings = []
+            print(f"Initial stream settings: {stream_settings}")
             def add_camera_to_stream_list():
                 selected_camera = combo.currentText()
                 selected_frame_rate = framerate_combo.currentText()
@@ -288,39 +299,35 @@ class MainWindow(QMainWindow):
                 elif public_ip_checkbox.isChecked():
                     selected_ip = localhost_ip
 
-                for idx, stream in enumerate(stream_settings, 1):
-                    #label = QLabel(f"{idx}. Camera: {stream['camera']}, Frame Rate: {stream['frame_rate']}, Resolution: {stream['resolution']}")
-                    #scroll_area.setStyleSheet("background-color: lightgray;")
-                    #scroll_layout.addWidget(label)
-                    #data = [[f"Camera: {stream['camera']}"], [f"Frame Rate: {stream['frame_rate']}"], [f"Resolution: {stream['resolution']}"]]
-
+                for _, stream in enumerate(stream_settings, 1):
                     tempcamera_data.append([
                         f"Camera: {stream['camera']} Frame Rate: ({stream['frame_rate']} FPS, Resolution: {stream['resolution']})",
                         f"rtsp://{selected_ip}:8554/{stream['camera'].strip().replace(' ', '_')}",
                         f"http://{selected_ip}:8889/{stream['camera'].strip().replace(' ', '_')}"
                     ])
 
-                data = [
-                  ["Camera Config", "RTSP URL [Click to Copy]", "Browser URL [Click to Copy]"],
-                ] + tempcamera_data
-                model = TableModel(data)
-                stream_settings_table.setModel(model)
-                stream_settings_table.setStyleSheet("QTableView { background-color: lightgray;} QHeaderView::section { background-color: gray; color: white; font-weight: bold; }")
+                tableheader = ["Camera Config", "RTSP URL [Click to Copy]", "Browser URL [Click to Copy]"]
+                data = tempcamera_data
+                model = TableModel(data, tableheader)
+                len(stream_settings) > 0 and stream_settings_table.setModel(model)
+                stream_settings_table.setStyleSheet("QTableView {background-color: lightgray;} QHeaderView::section { background-color: gray; color: white; font-weight: bold; }")
                 stream_settings_table.horizontalHeader().setStretchLastSection(False)
                 stream_settings_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)  # ResizeMode.Stretch
-                stream_settings_table.mousePressEvent = lambda event: on_stream_settings_table_clicked(event, stream_settings_table, tempcamera_data)
                 stream_settings_table.setCursor(Qt.CursorShape.PointingHandCursor)
 
-
-                def on_stream_settings_table_clicked(event, table, data):
-                    index = table.indexAt(event.pos())
+                def on_stream_settings_table_clicked(index):
                     if index.isValid():
                         row = index.row()
                         column = index.column()
-                        if column in [1, 2] and row != 0:
-                            url = data[row - 1][column]
+                        if column in [1, 2]:
+                            url = tempcamera_data[row][column]
                             clipboard = QApplication.clipboard()
                             clipboard.setText(url)
+                            #change background color of the cell to green for 1 second to indicate the url has been copied
+                            model.setData(model.index(row, column), QtGui.QColor("lightblue"), role=Qt.BackgroundRole)
+                            QTimer.singleShot(1000, lambda: model.setData(model.index(row, column), QtGui.QColor("lightgray"), role=Qt.BackgroundRole))
+
+                stream_settings_table.clicked.connect(on_stream_settings_table_clicked)
 
                 scroll_layout.addWidget(stream_settings_table)
 
@@ -511,7 +518,7 @@ class MainWindow(QMainWindow):
             
             def toggle_edittextffmpeg():
                 print("Toggling FFmpeg output visibility")
-                edittextffmpeg.setVisible(len(stream_settings) == 0)
+                edittextffmpeg.setVisible(len(stream_settings) > 0)
                 layout.addWidget(ffmpegscrollarea, 15, 6, 1, 6)
 
             def pmessageffmpeg(msg):
@@ -562,6 +569,7 @@ class MainWindow(QMainWindow):
                     p.readyReadStandardError.connect(lambda p=p, edittext=edittext: handle_multiple_ffmpeg_stderr(p, edittext))
                     p.stateChanged.connect(lambda state, p=p, edittext=edittext: handle_multiple_ffmpeg_state(state, p, edittext))
                     p.finished.connect(make_ffmpeg_finished_callback(stream['camera'], edittext))
+                    
                     
                     p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{stream['camera'].replace(' ', '_')}"])
 
@@ -729,25 +737,40 @@ class MainWindow(QMainWindow):
             layout.addWidget(reset_button, 18, 0, 1, 1)
 
             def reset_settings():
+                print("Resetting settings and clearing stream settings list")
                 combo.setCurrentIndex(0)
                 framerate_combo.setCurrentIndex(0)
                 resolution_combo.setCurrentIndex(0)
                 local_ip_checkbox.setChecked(False)
                 public_ip_checkbox.setChecked(False)
-                stream_settings.clear()
-                update_stream_list()
-                #toggle_edittextffmpeg()
+                toggle_edittextffmpeg()
                 #clear mediamtx and ffmpeg output text boxes
                 edittext.clear()
                 edittextffmpeg.clear()
                 update_rtsp_label()
                 update_webrtc_label()
+                #reset stream settings list
+                stream_settings.clear()
+                update_stream_list()
+                
                 #reset ffmpegbox by removing all widgets from the layout
                 for i in reversed(range(ffmpegbox.count())):
                     ffmpegbox.itemAt(i).widget().setParent(None)
                 
                 edittextffmpeg.setVisible(True)
                 ffmpegbox.addWidget(edittextffmpeg)
+
+                #fetch stream_settings file and reset settings to the values in the file if it exist
+                if os.path.exists("stream_settings.json"):
+                    settings = {
+                        "stream_settings": stream_settings,
+                        "selected_ip": "",
+                        "selected_frame_rate": "",
+                        "selected_resolution": ""
+                    }
+                    with open("stream_settings.json", "w") as f:
+                        json.dump(settings, f)
+
 
             reset_button.clicked.connect(reset_settings)
 
@@ -809,6 +832,8 @@ class MainWindow(QMainWindow):
                     update_selected_settings()
                     update_rtsp_label()
                     update_webrtc_label()
+                    edittextffmpeg.setVisible(len(stream_settings) == 0)
+                    layout.addWidget(ffmpegscrollarea, 15, 6, 1, 6)
 
 
             load_settings()
