@@ -1,6 +1,6 @@
 import json
 import sys
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QMainWindow, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
 from PySide6.QtCore import QTimer, Qt, QProcess
 from PySide6 import QtGui
 import platform
@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
                 if selected_camera == "" or selected_frame_rate == "" or selected_resolution == "" or selected_ip == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("Please select a camera, frame rate, resolution, and IP address before adding to the stream list.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -181,15 +181,45 @@ class MainWindow(QMainWindow):
                     "camera": selected_camera,
                     "frame_rate": selected_frame_rate,
                     "resolution": selected_resolution,
-                    "ip": selected_ip
+                    "ip": selected_ip,
+                    "custom_name": selected_camera.strip().replace(' ', '_')
                 }
                 if new_setting["camera"] not in [s["camera"] for s in stream_settings]:
-                    stream_settings.append(new_setting)
+                    print("Everything is OK")
+                    #add a input text field to input a custom name for the stream to be used in the rtsp url instead of the camera name  in a dialog box when adding a camera to the stream list. The custom name should be optional and if not provided, the camera name should be used in the rtsp url
+                    dlg = QDialog(self)
+                    dlg.setWindowTitle("Custom Stream Name")
+                    dlg.setMinimumSize(400, 150)
+                    layoutd = QVBoxLayout()
+                    label = QLabel("Enter a custom name for the stream URL:")
+                    layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                    line_edit = QLineEdit()
+                    layoutd.addWidget(line_edit, alignment=Qt.AlignmentFlag.AlignCenter)
+
+                    #add a button to confirm adding the camera to the stream list in the dialog box and only add the camera to the stream list when the button is clicked
+                    button = QPushButton("Add to Stream List")
+                    layoutd.addWidget(button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+                    def confirm_add():
+                        custom_name = line_edit.text().strip()
+                        if custom_name:
+                            new_setting["custom_name"] = custom_name
+                        elif not custom_name:
+                            new_setting["custom_name"] = selected_camera
+                        stream_settings.append(new_setting)
+                        dlg.close()
+
+                    button.clicked.connect(confirm_add)
+                    dlg.setLayout(layoutd)
+                    dlg.exec()
+
+
+                    #stream_settings.append(new_setting)
                 else:
                     return
                 print(f"Added to stream list: Camera: {selected_camera}, Frame Rate: {selected_frame_rate}, Resolution: {selected_resolution}, IP: {selected_ip}")
                 toggle_edittextffmpeg()
-            addcamera_button.clicked.connect(add_camera_to_stream_list)
+            #addcamera_button.clicked.connect(add_camera_to_stream_list)
 
             #add two checkboxes to select either localhost ip or the local network ip
             def get_local_ip():
@@ -299,11 +329,11 @@ class MainWindow(QMainWindow):
                 elif public_ip_checkbox.isChecked():
                     selected_ip = localhost_ip
 
-                for _, stream in enumerate(stream_settings, 1):
+                for i, stream in enumerate(stream_settings, 1):
                     tempcamera_data.append([
                         f"Camera: {stream['camera']} Frame Rate: ({stream['frame_rate']} FPS, Resolution: {stream['resolution']})",
-                        f"rtsp://{selected_ip}:8554/{stream['camera'].strip().replace(' ', '_')}",
-                        f"http://{selected_ip}:8889/{stream['camera'].strip().replace(' ', '_')}"
+                        f"rtsp://{selected_ip}:8554/{stream['custom_name'].strip().replace(' ', '_')}",
+                        f"http://{selected_ip}:8889/{stream['custom_name'].strip().replace(' ', '_')}"
                     ])
 
                 tableheader = ["Camera Config", "RTSP URL [Click to Copy]", "Browser URL [Click to Copy]"]
@@ -314,6 +344,61 @@ class MainWindow(QMainWindow):
                 stream_settings_table.horizontalHeader().setStretchLastSection(False)
                 stream_settings_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)  # ResizeMode.Stretch
                 stream_settings_table.setCursor(Qt.CursorShape.PointingHandCursor)
+
+                def add_edit_button(row):
+                    print(f"Adding edit button for row {row}")
+                    widget = QWidget()
+                    layout = QHBoxLayout(widget)
+                    layout.setContentsMargins(5, 2, 5, 2)
+                    edit_button = QPushButton("Edit")
+                    edit_button.setStyleSheet("padding: 1px; font-weight: bold; background-color: purple; color: white;")
+                    layout.addWidget(edit_button)
+                    layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+                    stream_settings_table.setIndexWidget(model.index(row, 1), widget)
+                    edit_button.clicked.connect(lambda _, r=row: edit_stream_settings(r))
+
+                    #button 2
+                    widget2 = QWidget()
+                    layout2 = QHBoxLayout(widget2)
+                    layout2.setContentsMargins(5, 2, 5, 2)
+                    edit_button2 = QPushButton("Edit")
+                    edit_button2.setStyleSheet("padding: 1px; font-weight: bold; background-color: purple; color: white;")
+                    layout2.addWidget(edit_button2)
+                    layout2.setAlignment(Qt.AlignmentFlag.AlignRight)
+                    stream_settings_table.setIndexWidget(model.index(row, 2), widget2)
+                    edit_button2.clicked.connect(lambda _, r=row: edit_stream_settings(r))
+
+                for i in range(len(stream_settings)):
+                    stream_settings_table.setRowHeight(i, 30)
+                    add_edit_button(i)
+
+                def edit_stream_settings(row):
+                    print(f"Editing stream settings for row {row}")
+                    stream = stream_settings[row]
+                    dlg = QDialog(self)
+                    dlg.setWindowTitle("Edit Stream Settings")
+                    dlg.setMinimumSize(400, 200)
+                    layoutd = QVBoxLayout()
+                    label = QLabel("Edit the stream URL name:")
+                    layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                    custom_name_line_edit = QLineEdit(stream['custom_name'])
+                    layoutd.addWidget(QLabel("Custom Stream Name (optional):"))
+                    layoutd.addWidget(custom_name_line_edit)
+
+
+                    def save_changes():
+                        stream['custom_name'] = custom_name_line_edit.text().strip()
+                        update_stream_list()
+                        dlg.close()
+
+                    save_button = QPushButton("Save Changes")
+                    save_button.setStyleSheet("font-weight: bold; background-color: green; color: white;")
+                    save_button.clicked.connect(save_changes)
+                    layoutd.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                    dlg.setLayout(layoutd)
+                    dlg.exec()
+                    
+
 
                 def on_stream_settings_table_clicked(index):
                     if index.isValid():
@@ -403,7 +488,7 @@ class MainWindow(QMainWindow):
                 if selected_camera == "" or selected_ip == "" or selected_frame_rate == "" or selected_resolution == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("Please select a camera, IP address, frame rate, and resolution before starting the RTSP stream.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -472,6 +557,8 @@ class MainWindow(QMainWindow):
                     
                 selected_frame_rate = framerate_combo.currentText()
                 selected_resolution = resolution_combo.currentText()
+                custom_name = stream_settings[-1]["custom_name"] if stream_settings else selected_camera.strip().replace(' ', '_')
+                print("Custom Name for Stream: ", custom_name)
 
 
                 print(f"Selected Camera: {device_path}")
@@ -482,7 +569,7 @@ class MainWindow(QMainWindow):
                 if selected_camera == "" or selected_ip == "" or selected_frame_rate == "" or selected_resolution == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("Please select a camera, frame rate, and resolution before starting the RTSP stream.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -500,7 +587,7 @@ class MainWindow(QMainWindow):
                     self.ffmpegp.readyReadStandardError.connect(handle_ffmpeg_stderr)
                     self.ffmpegp.stateChanged.connect(handle_ffmpeg_state)
                     self.ffmpegp.finished.connect(ffmpeg_finished)
-                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{selected_camera.replace(' ', '_')}"])
+                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{custom_name.replace(' ', '_')}"])
 
             edittextffmpeg = QPlainTextEdit()
             edittextffmpeg.setReadOnly(True)
@@ -571,7 +658,7 @@ class MainWindow(QMainWindow):
                     p.finished.connect(make_ffmpeg_finished_callback(stream['camera'], edittext))
                     
                     
-                    p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{stream['camera'].replace(' ', '_')}"])
+                    p.start("ffmpeg", ["-f", "dshow", "-video_size", stream['resolution'], "-framerate", stream['frame_rate'], "-i", f"video={stream['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{stream['custom_name'].replace(' ', '_')}"])
 
             def handle_multiple_ffmpeg_stderr(p, edittext):
                 error_output = p.readAllStandardError().data().decode()
@@ -790,7 +877,7 @@ class MainWindow(QMainWindow):
                     json.dump(settings, f)
                 dlg = QDialog(self)
                 dlg.setWindowTitle("Settings Saved")
-                dlg.setMinimumSize(400, 200)
+                dlg.setMinimumSize(400, 70)
                 layoutd = QVBoxLayout()
                 label = QLabel("Stream settings have been saved to stream_settings.json")
                 layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -887,7 +974,7 @@ class MainWindow(QMainWindow):
                 if selected_camera == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("Please select a camera before showing the video feed.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1034,7 +1121,7 @@ class MainWindow(QMainWindow):
                 if selected_camera == "" or selected_ip == "" or selected_frame_rate == "" or selected_resolution == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("Please select a camera, IP address, frame rate, and resolution before starting the RTSP stream.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1080,7 +1167,7 @@ class MainWindow(QMainWindow):
                 if selected_camera == "" or selected_ip == "" or selected_frame_rate == "" or selected_resolution == "":
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Info")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("Please select a camera, frame rate, and resolution before starting the RTSP stream.")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1098,7 +1185,7 @@ class MainWindow(QMainWindow):
                     #show dialog box with message "MediaMTX is running. Do you want to stop it?" and options "Yes" and "No"
                     dlg = QDialog(self)
                     dlg.setWindowTitle("MediaMTX is running")
-                    dlg.setMinimumSize(400, 200)
+                    dlg.setMinimumSize(400, 100)
                     layoutd = QVBoxLayout()
                     label = QLabel("MediaMTX. Confirm is running?")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
