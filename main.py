@@ -1,7 +1,8 @@
 import json
 import sys
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
 from PySide6.QtCore import QTimer, Qt, QProcess, QUrl
+from PySide6.QtGui import QMovie
 from PySide6 import QtGui
 import platform
 ostype = platform.system()
@@ -32,14 +33,12 @@ class LoginDialog(QDialog):
         layout = QVBoxLayout()
         self.username_input = QLineEdit()
         self.username_input.setMaxLength(50)
-        #self.username_input.setMaximumWidth(400)
         self.username_input.setStyleSheet("font-size: 16px; padding: 5px;")
         self.username_input.setPlaceholderText("Username")
         layout.addWidget(self.username_input)
 
         self.password_input = QLineEdit()
         self.password_input.setMaxLength(50)
-        #self.password_input.setMaximumWidth(400)
         self.password_input.setStyleSheet("font-size: 16px; padding: 5px;")
         self.password_input.setPlaceholderText("Password")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -49,12 +48,15 @@ class LoginDialog(QDialog):
         layout.addWidget(self.remember_checkbox)
         
         login_button = QPushButton("Login")
-        login_button.setStyleSheet("font-weight: bold; background-color: green; color: white; font-size: 16px; padding: 5px;")
-        #login_button.setMaximumWidth(400)
         login_button.clicked.connect(lambda: self.accept() if self.handle_login() else None)
         layout.addWidget(login_button)
         self.setLayout(layout)
         self.load_saved_credentials()
+        
+        # Auto-login if credentials are loaded
+        if self.has_saved_session():
+            print("Attempting auto-login with saved credentials...")
+            QTimer.singleShot(200, lambda: self.accept() if self.handle_login() else None)
         
 
     def load_saved_credentials(self):
@@ -63,6 +65,7 @@ class LoginDialog(QDialog):
             username = keyring.get_password(self.SERVICE_NAME, self.USERNAME_KEY)
             password = keyring.get_password(self.SERVICE_NAME, self.PASSWORD_KEY)
             if username and password:
+                print("Loaded saved credentials from keyring")
                 self.username_input.setText(username)
                 self.password_input.setText(password)
                 self.remember_checkbox.setChecked(True)
@@ -71,6 +74,7 @@ class LoginDialog(QDialog):
 
     def save_credentials(self):
         """Save credentials to keyring if remember checkbox is checked"""
+        print("Saving credentials...")
         if self.remember_checkbox.isChecked():
             try:
                 keyring.set_password(self.SERVICE_NAME, self.USERNAME_KEY, self.username_input.text())
@@ -88,7 +92,7 @@ class LoginDialog(QDialog):
             keyring.delete_password(self.SERVICE_NAME, self.USERNAME_KEY)
             keyring.delete_password(self.SERVICE_NAME, self.PASSWORD_KEY)
             keyring.delete_password(self.SERVICE_NAME, self.TOKEN_KEY)
-        except Exception as e:
+        except Exception:
             pass
 
     @staticmethod
@@ -99,7 +103,7 @@ class LoginDialog(QDialog):
             password = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.PASSWORD_KEY)
             token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
             return username and password and token
-        except Exception as e:
+        except Exception:
             return False
 
     def handle_login(self):
@@ -124,7 +128,7 @@ class LoginDialog(QDialog):
             if "token" in response_data:
                 try:
                     response_json = json.loads(response_data)
-                    self.token = response_json.get("token")
+                    self.token = response_json.get("data", {}).get("token")
                 except Exception as e:
                     print(f"Error parsing response: {e}")
                 self.save_credentials()
@@ -149,6 +153,31 @@ class LoginDialog(QDialog):
             dlg.setLayout(layoutd)
             dlg.exec()
             return False
+        
+    #logout function to clear saved credentials and return to login screen
+    def handle_logout(self):
+        self.clear_saved_credentials()
+        self.token = None
+        self.username_input.clear()
+        self.password_input.clear()
+        self.remember_checkbox.setChecked(False)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Logged Out")
+        dlg.setMinimumSize(400, 200)
+        layoutd = QVBoxLayout()
+        label = QLabel("You have been logged out.")
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(dlg.accept)
+        layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+        layoutd.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        dlg.setLayout(layoutd)
+        dlg.exec()
+        #close the main window and show the login dialog again
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow):
+                widget.close()
+        login_dialog = LoginDialog()
+        login_dialog.show()
 
 #table model
 class TableModel(QtCore.QAbstractTableModel):
@@ -1062,6 +1091,18 @@ class MainWindow(QMainWindow):
 
 
             load_settings()
+
+            #add a logout button that clears the saved credentials and returns to the login screen
+            logout_button = QPushButton("Logout")
+            logout_button.setStyleSheet("font-weight: bold; background-color: red; color: white;")
+            layout.addWidget(logout_button, 18, 2, 1, 1)
+            def logout():
+                print("Logging out and clearing saved credentials...")
+                #call handle_logout function on the LoginDialog class
+                login_dialog = LoginDialog()
+                login_dialog.handle_logout()
+
+            logout_button.clicked.connect(logout)
 
 
             #===========================================================
