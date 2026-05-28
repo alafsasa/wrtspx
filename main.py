@@ -1,7 +1,7 @@
 import json
 import sys
 from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
-from PySide6.QtCore import QTimer, Qt, QProcess
+from PySide6.QtCore import QTimer, Qt, QProcess, QUrl
 from PySide6 import QtGui
 import platform
 ostype = platform.system()
@@ -13,6 +13,142 @@ from qtpyTerminal import qtpyTerminal
 import psutil
 from cv2_enumerate_cameras import enumerate_cameras
 import os
+from pathlib import Path
+from PySide6 import QtNetwork
+import keyring
+
+#login screen
+class LoginDialog(QDialog):
+    SERVICE_NAME = "wrtspx_app"
+    USERNAME_KEY = "wrtspx_username"
+    PASSWORD_KEY = "wrtspx_password"
+    TOKEN_KEY = "wrtspx_token"
+    
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Login")
+        self.setMinimumSize(300, 200)
+        self.token = None
+        layout = QVBoxLayout()
+        self.username_input = QLineEdit()
+        self.username_input.setMaxLength(50)
+        #self.username_input.setMaximumWidth(400)
+        self.username_input.setStyleSheet("font-size: 16px; padding: 5px;")
+        self.username_input.setPlaceholderText("Username")
+        layout.addWidget(self.username_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setMaxLength(50)
+        #self.password_input.setMaximumWidth(400)
+        self.password_input.setStyleSheet("font-size: 16px; padding: 5px;")
+        self.password_input.setPlaceholderText("Password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.password_input)
+        
+        self.remember_checkbox = QCheckBox("Remember me")
+        layout.addWidget(self.remember_checkbox)
+        
+        login_button = QPushButton("Login")
+        login_button.setStyleSheet("font-weight: bold; background-color: green; color: white; font-size: 16px; padding: 5px;")
+        #login_button.setMaximumWidth(400)
+        login_button.clicked.connect(lambda: self.accept() if self.handle_login() else None)
+        layout.addWidget(login_button)
+        self.setLayout(layout)
+        self.load_saved_credentials()
+        
+
+    def load_saved_credentials(self):
+        """Load saved credentials from keyring if available"""
+        try:
+            username = keyring.get_password(self.SERVICE_NAME, self.USERNAME_KEY)
+            password = keyring.get_password(self.SERVICE_NAME, self.PASSWORD_KEY)
+            if username and password:
+                self.username_input.setText(username)
+                self.password_input.setText(password)
+                self.remember_checkbox.setChecked(True)
+        except Exception as e:
+            print(f"Error loading saved credentials: {e}")
+
+    def save_credentials(self):
+        """Save credentials to keyring if remember checkbox is checked"""
+        if self.remember_checkbox.isChecked():
+            try:
+                keyring.set_password(self.SERVICE_NAME, self.USERNAME_KEY, self.username_input.text())
+                keyring.set_password(self.SERVICE_NAME, self.PASSWORD_KEY, self.password_input.text())
+                if self.token:
+                    keyring.set_password(self.SERVICE_NAME, self.TOKEN_KEY, self.token)
+            except Exception as e:
+                print(f"Error saving credentials: {e}")
+        else:
+            self.clear_saved_credentials()
+
+    def clear_saved_credentials(self):
+        """Clear saved credentials from keyring"""
+        try:
+            keyring.delete_password(self.SERVICE_NAME, self.USERNAME_KEY)
+            keyring.delete_password(self.SERVICE_NAME, self.PASSWORD_KEY)
+            keyring.delete_password(self.SERVICE_NAME, self.TOKEN_KEY)
+        except Exception as e:
+            pass
+
+    @staticmethod
+    def has_saved_session():
+        """Check if a valid session is saved"""
+        try:
+            username = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.USERNAME_KEY)
+            password = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.PASSWORD_KEY)
+            token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+            return username and password and token
+        except Exception as e:
+            return False
+
+    def handle_login(self):
+        username = self.username_input.text()
+        password = self.password_input.text()
+        #use username and password to post to api endpoint to check if the username and password are correct and return true or false based on the response
+        urlx = QUrl("https://staging-users-api.onlinemanagement.info/api/v1.1/users/login")
+        request = QtNetwork.QNetworkRequest(urlx)
+        #send post request with username and password as json data
+        data = json.dumps({"userName": username, "password": password}).encode('utf-8')
+        request.setHeader(QtNetwork.QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        manager = QtNetwork.QNetworkAccessManager()
+        loop = QtCore.QEventLoop()
+        manager.finished.connect(loop.quit)
+        manager.post(request, data)
+        loop.exec()
+        reply = manager.post(request, data)
+        loop.exec()
+        if reply.error() == QtNetwork.QNetworkReply.NoError:
+            response_data = reply.readAll().data().decode()
+            #check if the response contains a token and return true if it does, otherwise return false
+            if "token" in response_data:
+                try:
+                    response_json = json.loads(response_data)
+                    self.token = response_json.get("token")
+                except Exception as e:
+                    print(f"Error parsing response: {e}")
+                self.save_credentials()
+                return True
+            else:
+                dlg = QDialog(self)
+                dlg.setWindowTitle("Login Failed")
+                dlg.setMinimumSize(400, 200)
+                layoutd = QVBoxLayout()
+                label = QLabel("Login failed. Please check your username and password and try again.")
+                layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                dlg.setLayout(layoutd)
+                dlg.exec()
+                return False
+        else:
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Login Failed")
+            dlg.setMinimumSize(400, 200)
+            layoutd = QVBoxLayout()
+            label = QLabel("An error occurred while trying to log in. Please check your network connection and try again.")
+            layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+            dlg.setLayout(layoutd)
+            dlg.exec()
+            return False
 
 #table model
 class TableModel(QtCore.QAbstractTableModel):
@@ -157,7 +293,6 @@ class MainWindow(QMainWindow):
             layout.addWidget(addcamera_button, 6, 2, 1, 1)
 
             stream_settings = []
-            print(f"Initial stream settings: {stream_settings}")
             def add_camera_to_stream_list():
                 selected_camera = combo.currentText()
                 selected_frame_rate = framerate_combo.currentText()
@@ -346,7 +481,6 @@ class MainWindow(QMainWindow):
                 stream_settings_table.setCursor(Qt.CursorShape.PointingHandCursor)
 
                 def add_edit_button(row):
-                    print(f"Adding edit button for row {row}")
                     widget = QWidget()
                     layout = QHBoxLayout(widget)
                     layout.setContentsMargins(5, 2, 5, 2)
@@ -848,18 +982,23 @@ class MainWindow(QMainWindow):
                 ffmpegbox.addWidget(edittextffmpeg)
 
                 #fetch stream_settings file and reset settings to the values in the file if it exist
-                if os.path.exists("stream_settings.json"):
+                if settings_file.exists():
                     settings = {
                         "stream_settings": stream_settings,
                         "selected_ip": "",
                         "selected_frame_rate": "",
                         "selected_resolution": ""
                     }
-                    with open("stream_settings.json", "w") as f:
+                    with open(settings_file, "w") as f:
                         json.dump(settings, f)
 
 
             reset_button.clicked.connect(reset_settings)
+
+            #create a path to C:\Users\<Username>\AppData\Roaming\wrtspx and save the stream_settings.json file there. If the directory does not exist, create it.
+            appdata_path = Path(os.getenv("APPDATA")) / "wrtspx"
+            appdata_path.mkdir(parents=True, exist_ok=True)
+            settings_file = appdata_path / "stream_settings.json"
 
             #save settings button to save the current stream settings to a json file
             save_settings_button = QPushButton("Save Settings")
@@ -873,7 +1012,7 @@ class MainWindow(QMainWindow):
                     "selected_resolution": resolution_combo.currentText()
                 }
 
-                with open("stream_settings.json", "w") as f:
+                with open(settings_file, "w") as f:
                     json.dump(settings, f)
                 dlg = QDialog(self)
                 dlg.setWindowTitle("Settings Saved")
@@ -889,12 +1028,11 @@ class MainWindow(QMainWindow):
 
             #on application start, check if stream_settings.json file exists and if it does, load the settings and populate the stream settings list and update the UI accordingly
             def load_settings():
-                if os.path.exists("stream_settings.json"):
-                    with open("stream_settings.json", "r") as f:
+                if settings_file.exists():
+                    with open(settings_file, "r") as f:
                         settings = json.load(f)
                     loaded_stream_settings = settings.get("stream_settings", [])
                     stream_settings.extend(loaded_stream_settings)
-                    print(f"Loaded stream settings: {stream_settings}")
                     selected_camera = stream_settings[0]['camera'] if stream_settings else ""
                     selected_ip = settings.get("selected_ip", "")
                     selected_frame_rate = settings.get("selected_frame_rate", "")
@@ -1270,7 +1408,11 @@ class MainWindow(QMainWindow):
 
 
 app = QApplication(sys.argv) #creates an instance of the application, which is necessary to run any PySide6 application.
-window = MainWindow()
-window.show()
+
+login = LoginDialog()
+if login.exec() == QDialog.DialogCode.Accepted:
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec()) #starts the event loop, which keeps the application running until the user closes it.
 
 app.exec() #starts the event loop, which keeps the application running until the user closes it.
