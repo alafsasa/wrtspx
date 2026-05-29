@@ -1,6 +1,6 @@
 import json
 import sys
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QScrollArea, QTableView, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QScrollArea, QTableView, QTextEdit, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
 from PySide6.QtCore import QTimer, Qt, QProcess, QUrl
 from PySide6.QtGui import QMovie
 from PySide6 import QtGui
@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
         #camera and network settings label
         label1 = QLabel("Camera and Network Settings")
         label1.setStyleSheet("font-weight: bold;")
-        layout.addWidget(label1, 0, 0, 1, 6)
+        layout.addWidget(label1, 0, 0, 1, 4)
         #check operating system
         if ostype == "Windows":
             #===========================================================
@@ -236,7 +236,15 @@ class MainWindow(QMainWindow):
             print("Running on Windows")
             #add label for system os and version
             label2 = QLabel(f"System OS: {ostype} {platform.release()}")
-            layout.addWidget(label2, 0, 6, 1, 6)
+            layout.addWidget(label2, 0, 3, 1, 4)
+
+            #add label to show Autogate name
+            autogate_main_name = 'N/A'
+            global_autogateid = 'undefined'
+            autogate_label = QLabel(f"Autogate Name: {autogate_main_name}")
+            autogate_label.setStyleSheet("font-weight: bold;")
+            layout.addWidget(autogate_label, 0, 6, 1, 4)
+
             #enumerate cameras using cv2_enumerate_cameras
             cameras = enumerate_cameras()
             #add cameras to a combo box showing camera name
@@ -1089,6 +1097,20 @@ class MainWindow(QMainWindow):
                     edittextffmpeg.setVisible(len(stream_settings) == 0)
                     layout.addWidget(ffmpegscrollarea, 15, 6, 1, 6)
 
+                #load autogate configuration from autogate_config.json file in the appdata directory if it exists and update the autogate label in the main window
+                if appdata_path.exists():
+                    autogate_config_file = appdata_path / "autogate_config.json"
+                    if autogate_config_file.exists():
+                        with open(autogate_config_file, "r") as f:
+                            autogate_config = json.load(f)
+                        autogate_name = autogate_config.get("gateName", "N/A")
+                        autogate_id = autogate_config.get("id", "N/A")
+                        nonlocal autogate_main_name
+                        autogate_main_name = autogate_name
+                        autogate_label.setText(f"Autogate Name: {autogate_main_name}")
+                        #update global_autogateid variable with the autogate id from the config file
+                        nonlocal global_autogateid
+                        global_autogateid = autogate_id
 
             load_settings()
 
@@ -1103,6 +1125,118 @@ class MainWindow(QMainWindow):
                 login_dialog.handle_logout()
 
             logout_button.clicked.connect(logout)
+
+            #configure autogate
+            autogate_button = QPushButton("Configure AutoGate")
+            autogate_button.setStyleSheet("font-weight: bold; background-color: teal; color: white;")
+            layout.addWidget(autogate_button, 18, 3, 1, 1)
+
+            def configure_autogate():
+                dlg = QDialog(self)
+                dlg.setWindowTitle("AutoGate Configuration")
+                dlg.setMinimumSize(400, 200)
+                layoutd = QVBoxLayout()
+                label = QLabel("Enter IntercomShortCode to fetch Autogate configuration from the server")
+                layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                shortcode_line_edit = QLineEdit()
+                layoutd.addWidget(shortcode_line_edit, alignment=Qt.AlignmentFlag.AlignCenter)
+                fetch_button = QPushButton("Fetch Configuration")
+                layoutd.addWidget(fetch_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+                #define function to handle fetching autogate configuration using the entered intercom shortcode
+                def handle_autogate_configuration():
+                    print("Handling AutoGate configuration...")
+                    print("Entered Intercom Shortcode: ", shortcode_line_edit.text())
+                    #use the entered shortcode to fetch autogate configuration from the server using a GET request to the endpoint 'https://staging-users-api.onlinemanagement.info/api/v1.1/autoGate?intercomShortCode={shortcode}' 
+                    try:
+                        urlx = QUrl(f"https://staging-users-api.onlinemanagement.info/api/v1.1/autoGate?intercomShortCode={shortcode_line_edit.text()}")
+                        request = QtNetwork.QNetworkRequest(urlx)
+                        token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+                        if token:
+                            request.setRawHeader(b"Authorization", f"Bearer {token}".encode())
+                        manager = QtNetwork.QNetworkAccessManager(self)
+                        reply = manager.get(request)
+                        def handle_reply():
+                            if reply.error() == QtNetwork.QNetworkReply.NoError:
+                                response = reply.readAll().data().decode()
+                                #close dlg
+                                dlg.close()
+                                dlg_response = QDialog(self)
+                                dlg_response.setWindowTitle("AutoGate Configuration Response")
+                                dlg_response.setMinimumSize(400, 200)
+                                layout_response = QVBoxLayout()
+                                label_response = QLabel(f"AutoGate Configuration Response")
+                                #show autogate name and the autogateid from response in a message box
+                                try:
+                                    response_json = json.loads(response)
+                                    autogate_name = response_json.get("data", {})
+                                    autogate_namex = autogate_name[0].get("gateName", "N/A")
+                                    autogate_id = autogate_name[0].get("id", "N/A")
+                                    label_response.setText(f"AutoGate Name: {autogate_namex}\nAutoGate ID: {autogate_id}")
+                                    #add save button autogate name and id to a json file in the appdata directory
+                                    save_button = QPushButton("Save AutoGate Configuration")
+                                    layout_response.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                                    def save_autogate_configuration():
+                                        autogate_config = {
+                                            "gateName": autogate_namex,
+                                            "id": autogate_id
+                                        }
+                                        autogate_config_file = appdata_path / "autogate_config.json"
+                                        with open(autogate_config_file, "w") as f:
+                                            json.dump(autogate_config, f)
+                                        dlg_saved = QDialog(self)
+                                        dlg_saved.setWindowTitle("Saved")
+                                        dlg_saved.setMinimumSize(400, 100)
+                                        layout_saved = QVBoxLayout()
+                                        label_saved = QLabel("AutoGate configuration saved successfully.")
+                                        layout_saved.addWidget(label_saved, alignment=Qt.AlignmentFlag.AlignCenter)
+                                        dlg_saved.setLayout(layout_saved)
+                                        dlg_saved.exec()
+                                        #update autogate_main_name variable and autogate label in the main window
+                                        nonlocal autogate_main_name
+                                        autogate_main_name = autogate_namex
+                                        autogate_label.setText(f"Autogate Name: {autogate_main_name}")
+
+                                    save_button.clicked.connect(save_autogate_configuration)
+                                        
+                                except json.JSONDecodeError:
+                                    label_response.setText(f"AutoGate Configuration Response:\n{response}")
+                                label_response.setWordWrap(True)
+                                layout_response.addWidget(label_response, alignment=Qt.AlignmentFlag.AlignCenter)
+                                dlg_response.setLayout(layout_response)
+                                dlg_response.exec()
+                            else:
+                                error_message = reply.errorString()
+                                print("Error fetching AutoGate configuration: ", error_message)
+                                dlg_error = QDialog(self)
+                                dlg_error.setWindowTitle("Error")
+                                dlg_error.setMinimumSize(400, 100)
+                                layout_error = QVBoxLayout()
+                                label_error = QLabel(f"Error fetching AutoGate configuration:\n{error_message}")
+                                label_error.setWordWrap(True)
+                                layout_error.addWidget(label_error, alignment=Qt.AlignmentFlag.AlignCenter)
+                                dlg_error.setLayout(layout_error)
+                                dlg_error.exec()
+                        reply.finished.connect(handle_reply)
+
+                    except Exception as e:
+                        print("Exception occurred while fetching AutoGate configuration: ", str(e))
+                        dlg_exception = QDialog(self)
+                        dlg_exception.setWindowTitle("Exception")
+                        dlg_exception.setMinimumSize(400, 100)
+                        layout_exception = QVBoxLayout()
+                        label_exception = QLabel(f"Exception occurred while fetching AutoGate configuration:\n{str(e)}")
+                        label_exception.setWordWrap(True)
+                        layout_exception.addWidget(label_exception, alignment=Qt.AlignmentFlag.AlignCenter)
+                        dlg_exception.setLayout(layout_exception)
+                        dlg_exception.exec()
+
+                fetch_button.clicked.connect(lambda: handle_autogate_configuration())
+
+                #show dialog
+                dlg.setLayout(layoutd)
+                dlg.exec()
+            autogate_button.clicked.connect(configure_autogate)
 
 
             #===========================================================
