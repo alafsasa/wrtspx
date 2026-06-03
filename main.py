@@ -1,7 +1,7 @@
 import json
 import sys
 from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QScrollArea, QTableView, QTextEdit, QWidget, QPushButton, QLabel, QVBoxLayout, QCheckBox
-from PySide6.QtCore import QTimer, Qt, QProcess, QUrl
+from PySide6.QtCore import QSize, QTimer, Qt, QProcess, QUrl
 from PySide6.QtGui import QMovie
 from PySide6 import QtGui
 import platform
@@ -228,6 +228,8 @@ class MainWindow(QMainWindow):
         label1 = QLabel("Camera and Network Settings")
         label1.setStyleSheet("font-weight: bold;")
         layout.addWidget(label1, 0, 0, 1, 4)
+        gif_path = Path("gifx.gif")
+
         #check operating system
         if ostype == "Windows":
             #===========================================================
@@ -359,9 +361,9 @@ class MainWindow(QMainWindow):
                 if new_setting["camera"] not in [s["camera"] for s in stream_settings]:
                     print("Everything is OK")
                     #add a input text field to input a custom name for the stream to be used in the rtsp url instead of the camera name  in a dialog box when adding a camera to the stream list. The custom name should be optional and if not provided, the camera name should be used in the rtsp url
-                    dlg = QDialog(self)
-                    dlg.setWindowTitle("Custom Stream Name")
-                    dlg.setMinimumSize(400, 150)
+                    customNamedlg = QDialog(self)
+                    customNamedlg.setWindowTitle("Custom Stream Name")
+                    customNamedlg.setMinimumSize(400, 150)
                     layoutd = QVBoxLayout()
                     label = QLabel("Enter a custom name for the stream URL:")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -372,18 +374,134 @@ class MainWindow(QMainWindow):
                     button = QPushButton("Add to Stream List")
                     layoutd.addWidget(button, alignment=Qt.AlignmentFlag.AlignCenter)
 
+                    #post selected camera configuration to the server
+                    def post_camera_configurations():
+                        print("Posting camera configurations to the server...")
+                        #camera configuration data to be posted to the server
+                        camera_value = "{\n\"CameraType\": \"USB\",\n\"CameraName\": \"" + new_setting["camera"] + "\",\n\"FrameRate\": " + new_setting["frame_rate"] + ",\n\"Resolution\": \"" + new_setting["resolution"] + "\"\n, \"RTSP\": \"rtsp://" + new_setting["ip"] + ":8554/" + new_setting["custom_name"].strip().replace(' ', '_') + "\"\n, \"Selected_IP\": \"" + new_setting["ip"] + "\"\n, \"CustomName\": \"" + new_setting["custom_name"].strip().replace(' ', '_') + "\"\n}"
+                        camera_config = json.dumps({
+                            "autoGateId": global_autogateid,
+                            "type": "Device",
+                            "infoSource": "Intercom",
+                            "name": "rtspcamera",
+                            "value": camera_value
+                        }).encode('utf-8')
+
+                        #show gifx.gif while posting the camera configuration to the server
+                        gif_label = QLabel()
+                        movie = QMovie("gifx.gif")
+                        movie.setScaledSize(QSize(20, 20))
+                        gif_label.setMovie(movie)
+                        movie.start()
+                        layoutd.addWidget(gif_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+                        #check if the camera configuration exist on the autoGateInfo/all/{autoGateId} endpoint and if it does, show a dialog box with the message "Camera configuration already exists" and an "OK" button to close the dialog
+                        #fetch autogateinfo from the server using the autoGateId
+                        getAutogateInfoURL = QUrl(f"https://staging-users-api.onlinemanagement.info/api/v1.1/autoGateInfo/all/{global_autogateid}?name=rtspcamera")
+                        getAutogateInfoRequest = QtNetwork.QNetworkRequest(getAutogateInfoURL)
+                        token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+                        if token:
+                            getAutogateInfoRequest.setRawHeader(b"Authorization", f"Bearer {token}".encode('utf-8'))
+                        getAutogateInfoManager = QtNetwork.QNetworkAccessManager()
+                        getAutogateInfoReply = getAutogateInfoManager.get(getAutogateInfoRequest)
+                        loop = QtCore.QEventLoop()
+                        getAutogateInfoManager.finished.connect(loop.quit)
+                        loop.exec()
+                        if getAutogateInfoReply.error() == QtNetwork.QNetworkReply.NoError:
+                            response_data = getAutogateInfoReply.readAll().data().decode()
+                            try:
+                                response_json = json.loads(response_data)
+                                finderFlag = False
+                                for cameraconfig in response_json:
+                                    print(f"Checking existing camera configuration: {cameraconfig}")
+                                    print(f"Camera configuration value: {cameraconfig.get('value', '')}")
+                                    #CameraName
+                                    print(f"CameraName in value: {json.loads(cameraconfig.get('value', '{}')).get('CameraName', '')}")
+                                    #RTSP
+                                    print(f"RTSP in value: {json.loads(cameraconfig.get('value', '{}')).get('RTSP', '')}")
+                                    if json.loads(cameraconfig.get('value', '{}')).get('CameraName', '') == new_setting["camera"] and json.loads(cameraconfig.get('value', '{}')).get('RTSP', '') == f"rtsp://{new_setting['ip']}:8554/{new_setting['custom_name'].strip().replace(' ', '_')}":
+                                        finderFlag = True
+                                        break
+                                if finderFlag:
+                                    dlg = QDialog(self)
+                                    dlg.setWindowTitle("Info")
+                                    dlg.setMinimumSize(400, 150)
+                                    layoutx = QVBoxLayout()
+                                    label = QLabel("Camera configuration already exists.")
+                                    layoutx.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                                    ok_button = QPushButton("OK")
+                                    ok_button.clicked.connect(dlg.accept)
+                                    layoutx.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                                    dlg.setLayout(layoutx)
+                                    movie.stop()
+                                    dlg.exec()
+                                    customNamedlg.close()
+                                    return
+                                #if the camera configuration does not exist, post the camera configuration to the server
+                                if finderFlag == False:
+                                    print("Camera configuration does not exist. Posting to the server...")
+                                    #post request to the server with the camera configuration data
+                                    url = QUrl("https://staging-users-api.onlinemanagement.info/api/v1.1/autoGateInfo")
+                                    request = QtNetwork.QNetworkRequest(url)
+                                    token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+                                    if token:
+                                        request.setRawHeader(b"Authorization", f"Bearer {token}".encode('utf-8'))
+                                    request.setHeader(QtNetwork.QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+                                    manager = QtNetwork.QNetworkAccessManager()
+                                    loop = QtCore.QEventLoop()
+                                    manager.finished.connect(loop.quit)
+                                    reply = manager.post(request, camera_config)
+                                    loop.exec()
+
+                                    if reply.error() == QtNetwork.QNetworkReply.NoError:
+                                        response_data = reply.readAll().data().decode()
+                                        print("Camera configuration posted successfully. Server response:", response_data)
+                                        customNamedlg.close()
+                                        #show dialog box with message "Camera configuration posted successfully" and an "OK" button to close the dialog
+                                        success_dlg = QDialog(self)
+                                        success_dlg.setWindowTitle("Success")
+                                        success_dlg.setMinimumSize(400, 150)
+                                        success_layout = QVBoxLayout()
+                                        success_label = QLabel("Camera configuration posted successfully.")
+                                        success_layout.addWidget(success_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                                        ok_button = QPushButton("OK")
+                                        ok_button.clicked.connect(success_dlg.accept)
+                                        success_layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                                        success_dlg.setLayout(success_layout)
+                                        movie.stop()
+                                        success_dlg.exec()
+                                    else:
+                                        print("Error posting camera configuration. Server response:", reply.errorString())
+                                        #show dialog box with message "Error posting camera configuration" and an "OK" button to close the dialog
+                                        error_dlg = QDialog(self)
+                                        error_dlg.setWindowTitle("Error")
+                                        error_dlg.setMinimumSize(400, 150)
+                                        error_layout = QVBoxLayout()
+                                        error_label = QLabel("Error posting camera configuration. Please try again.")
+                                        error_layout.addWidget(error_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                                        ok_button = QPushButton("OK")
+                                        ok_button.clicked.connect(error_dlg.accept)
+                                        error_layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                                        error_dlg.setLayout(error_layout)
+                                        movie.stop()
+                                        error_dlg.exec()
+
+                            except Exception as e:
+                                print(f"Error parsing response: {e}")
+
                     def confirm_add():
                         custom_name = line_edit.text().strip()
                         if custom_name:
                             new_setting["custom_name"] = custom_name
                         elif not custom_name:
                             new_setting["custom_name"] = selected_camera
+
                         stream_settings.append(new_setting)
-                        dlg.close()
+                        post_camera_configurations()
 
                     button.clicked.connect(confirm_add)
-                    dlg.setLayout(layoutd)
-                    dlg.exec()
+                    customNamedlg.setLayout(layoutd)
+                    customNamedlg.exec()
 
 
                     #stream_settings.append(new_setting)
@@ -1112,6 +1230,79 @@ class MainWindow(QMainWindow):
                         nonlocal global_autogateid
                         global_autogateid = autogate_id
 
+                #fetch autogateinfo by the autogate id from the autogate configuration file if it exists and print the response in the console
+                if global_autogateid:
+                        try:
+                            urlx = QUrl(f"https://staging-users-api.onlinemanagement.info/api/v1.1/autoGateInfo/all/{global_autogateid}?name=rtspcamera")
+                            request = QtNetwork.QNetworkRequest(urlx)
+                            token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+                            if token:
+                                request.setRawHeader(b"Authorization", f"Bearer {token}".encode())
+                            manager = QtNetwork.QNetworkAccessManager(self)
+                            reply = manager.get(request)
+                            def handle_reply():
+                                if reply.error() == QtNetwork.QNetworkReply.NoError:
+                                    response = reply.readAll().data().decode()
+                                    try:
+                                        response_json = json.loads(response)
+                                        for cameraconfig in response_json:
+                                            print("AutoGate Info Response: ", cameraconfig)
+                                            #x = {'id': '338C3F17-C5BD-40A2-B93C-012CF0B51F4C', 'autoGateId': '56EA9E50-2AA9-43B2-8773-E74889CD4C6E', 'type': 'Device', 'infoSource': 'Intercom', 'info': None, 'name': 'rtspcamera', 'value': '{\n"CameraType": "USB",\n"CameraName": "GENERAL WEBCAM",\n"FrameRate": 30,\n"Resolution": "1280x720"\n, "RTSP": "rtsp://127.0.0.1:8554/intercom"\n}', 'extra': None, 'file': None, 'deviceShortCode': None}
+                                            #CameraName
+                                            cameraconfigname = json.loads(cameraconfig.get('value', '{}')).get('CameraName', 'N/A')
+                                            print(f"CamerName in value : {cameraconfigname}")
+
+                                            selected_camera = cameraconfigname
+                                            selected_ip = json.loads(cameraconfig.get('value', '{}')).get('Selected_IP', '')
+                                            selected_frame_rate = json.loads(cameraconfig.get('value', '{}')).get('FrameRate', '')
+                                            selected_resolution = json.loads(cameraconfig.get('value', '{}')).get('Resolution', '')
+
+                                            if selected_camera in [combo.itemText(i) for i in range(combo.count())]:
+                                                combo.setCurrentText(selected_camera)
+                                            
+                                            if selected_ip == local_ip:
+                                                local_ip_checkbox.setChecked(True)
+                                            elif selected_ip == localhost_ip:
+                                                public_ip_checkbox.setChecked(True)
+                                            
+                                            print("A")
+                                            print(selected_frame_rate)
+                                            if selected_frame_rate in [framerate_combo.itemText(i) for i in range(framerate_combo.count())]:
+                                                print(f"Setting frame rate to {selected_frame_rate} xx")
+                                                framerate_combo.setCurrentText(selected_frame_rate)
+
+                                            if selected_resolution in [resolution_combo.itemText(i) for i in range(resolution_combo.count())]:
+                                                resolution_combo.setCurrentText(selected_resolution)
+
+                                            #use response to populate the stream settings list with a dictionary that has the keys "camera", "frame_rate", "resolution", and "custom_name" where the values are taken from the response
+                                            stream_settings.append({
+                                                "camera": selected_camera,
+                                                "frame_rate": selected_frame_rate,
+                                                "resolution": selected_resolution,
+                                                "custom_name": json.loads(cameraconfig.get('value', '{}')).get('CustomName', '')
+                                            })
+                                            print("Stream settings list after loading from autogate info: ", stream_settings)
+                                            update_stream_list()
+                                            update_selected_settings()
+                                            update_rtsp_label()
+                                            update_webrtc_label()
+                                            edittextffmpeg.setVisible(len(stream_settings) == 0)
+
+
+
+                                    except json.JSONDecodeError:
+                                        print("AutoGate Info Response: ", response)
+                                    
+
+                                else:
+                                    error_message = reply.errorString()
+                                    print("Error fetching AutoGate info: ", error_message)
+    
+                            reply.finished.connect(handle_reply)
+    
+                        except Exception as e:
+                            print("Exception occurred while fetching AutoGate info: ", str(e))
+
             load_settings()
 
             #add a logout button that clears the saved credentials and returns to the login screen
@@ -1237,7 +1428,6 @@ class MainWindow(QMainWindow):
                 dlg.setLayout(layoutd)
                 dlg.exec()
             autogate_button.clicked.connect(configure_autogate)
-
 
             #===========================================================
             #END OF WINDOWS-SPECIFIC CODE, START OF LINUX-SPECIFIC CODE
