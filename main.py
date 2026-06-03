@@ -27,6 +27,8 @@ class LoginDialog(QDialog):
     
     def __init__(self):
         super().__init__()
+        app_icon = QtGui.QIcon("applicationx.png")
+        self.setWindowIcon(app_icon)
         self.setWindowTitle("Login")
         self.setMinimumSize(300, 200)
         self.token = None
@@ -229,6 +231,9 @@ class MainWindow(QMainWindow):
         label1.setStyleSheet("font-weight: bold;")
         layout.addWidget(label1, 0, 0, 1, 4)
         gif_path = Path("gifx.gif")
+        app_icon = QtGui.QIcon("applicationx.png")
+        self.setWindowIcon(app_icon)
+
 
         #check operating system
         if ostype == "Windows":
@@ -657,9 +662,23 @@ class MainWindow(QMainWindow):
                     stream_settings_table.setIndexWidget(model.index(row, 2), widget2)
                     edit_button2.clicked.connect(lambda _, r=row: edit_stream_settings(r))
 
+                #edit buttons
                 for i in range(len(stream_settings)):
                     stream_settings_table.setRowHeight(i, 30)
                     add_edit_button(i)
+
+                #delete buttons
+                for i in range(len(stream_settings)):
+                    widget = QWidget()
+                    layout = QHBoxLayout(widget)
+                    layout.setContentsMargins(5, 2, 5, 2)
+                    delete_button = QPushButton("")
+                    delete_button.setIcon(QtGui.QIcon("delete.png"))
+                    delete_button.setStyleSheet("padding: 1px; font-weight: bold;")
+                    layout.addWidget(delete_button)
+                    layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+                    stream_settings_table.setIndexWidget(model.index(i, 0), widget)
+                    delete_button.clicked.connect(lambda _, r=i: delete_stream_settings(r))
 
                 def edit_stream_settings(row):
                     print(f"Editing stream settings for row {row}")
@@ -667,6 +686,7 @@ class MainWindow(QMainWindow):
                     dlg = QDialog(self)
                     dlg.setWindowTitle("Edit Stream Settings")
                     dlg.setMinimumSize(400, 200)
+                    dlg.setMaximumSize(400, 200)
                     layoutd = QVBoxLayout()
                     label = QLabel("Edit the stream URL name:")
                     layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -674,17 +694,166 @@ class MainWindow(QMainWindow):
                     layoutd.addWidget(QLabel("Custom Stream Name (optional):"))
                     layoutd.addWidget(custom_name_line_edit)
 
+                    gif_label_visible = False
 
                     def save_changes():
                         stream['custom_name'] = custom_name_line_edit.text().strip()
                         update_stream_list()
-                        dlg.close()
+                        gif_label_visible = True
+                        gif_label.setVisible(gif_label_visible)
+                        save_button.setEnabled(False)
+                        #update the camera configuration on the server with the new custom name
+                        new_camera_value ="{\n\"CameraType\": \"USB\",\n\"CameraName\": \"" + stream["camera"] + "\", \n\"FrameRate\": " + stream["frame_rate"] + ",\n\"Resolution\": \"" + stream["resolution"] + "\"\n, \"RTSP\": \"rtsp://" + stream["selected_ip"] + ":8554/" + stream["custom_name"].strip().replace(' ', '_') + "\"\n, \"Selected_IP\": \"" + stream["selected_ip"] + "\"\n, \"CustomName\": \"" + stream["custom_name"].strip().replace(' ', '_') + "\"\n}"
+                        temp_camera_config = json.dumps({
+                            "value": new_camera_value
+                        }).encode('utf-8')
+
+                        url = QUrl(f"https://staging-users-api.onlinemanagement.info/api/v1.1/autoGateInfo/{stream['autogateinfoid']}")
+                        request = QtNetwork.QNetworkRequest(url)
+                        token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+                        if token:
+                            request.setRawHeader(b"Authorization", f"Bearer {token}".encode('utf-8'))
+                        request.setHeader(QtNetwork.QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+                        manager = QtNetwork.QNetworkAccessManager()
+                        loop = QtCore.QEventLoop()
+                        manager.finished.connect(loop.quit)
+                        reply = manager.post(request, temp_camera_config)
+                        loop.exec()
+
+                        if reply.error() == QtNetwork.QNetworkReply.NoError:
+                            response_data = reply.readAll().data().decode()
+                            gif_label_visible = False
+                            gif_label.setVisible(gif_label_visible)
+                            save_button.setEnabled(True)
+                            dlg.close()
+                            #show dialog box with message "Camera configuration updated successfully" and an "OK" button to close the dialog
+                            success_dlg = QDialog(self)
+                            success_dlg.setWindowTitle("Success")
+                            success_dlg.setMinimumSize(400, 150)
+                            success_layout = QVBoxLayout()
+                            success_label = QLabel("Camera configuration updated successfully.")
+                            success_layout.addWidget(success_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                            ok_button = QPushButton("OK")
+                            ok_button.clicked.connect(success_dlg.accept)
+                            success_layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                            success_dlg.setLayout(success_layout)
+                            success_dlg.exec()
+
+                        else:
+                            error_message = reply.errorString()
+                            print("Failed to update camera configuration. Error:", error_message)
+                            gif_label_visible = False
+                            gif_label.setVisible(gif_label_visible)
+                            save_button.setEnabled(True)
+                            dlg.close()
+                            #show dialog box with message "Failed to update camera configuration" and an "OK" button to close the dialog
+                            error_dlg = QDialog(self)
+                            error_dlg.setWindowTitle("Error")
+                            error_dlg.setMinimumSize(400, 150)
+                            error_layout = QVBoxLayout()
+                            error_label = QLabel("Failed to update camera configuration.")
+                            error_layout.addWidget(error_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                            ok_button = QPushButton("OK")
+                            ok_button.clicked.connect(error_dlg.accept)
+                            error_layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                            error_dlg.setLayout(error_layout)
+                            error_dlg.exec()
 
                     save_button = QPushButton("Save Changes")
                     save_button.setStyleSheet("font-weight: bold; background-color: green; color: white;")
                     save_button.clicked.connect(save_changes)
                     layoutd.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                    #add gifx.gif to the dialog and show it while saving changes to the server
+                    gif_label = QLabel()
+                    movie = QMovie("gifx.gif")
+                    gif_label.setMovie(movie)
+                    movie.start()
+                    movie.setScaledSize(QSize(20, 20))
+                    layoutd.addWidget(gif_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                    gif_label.setVisible(gif_label_visible)
                     dlg.setLayout(layoutd)
+                    dlg.exec()
+
+                def delete_stream_settings(row):
+                    print(f"Deleting stream settings for row {row}")
+                    #show a confirmation dialog box before deleting the stream settings with the message "Are you sure you want to delete this stream configuration?" and options "Yes" and "No"
+                    dlg = QDialog(self)
+                    dlg.setWindowTitle("Confirm Delete")
+                    dlg.setMinimumSize(400, 150)
+                    dlg.setMaximumSize(400, 150)
+                    layoutd = QVBoxLayout()
+                    label = QLabel("Are you sure you want to delete this stream configuration?")
+                    layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                    button_layout = QHBoxLayout()
+                    yes_button = QPushButton("Yes")
+                    no_button = QPushButton("No")
+                    button_layout.addWidget(yes_button)
+                    button_layout.addWidget(no_button)
+                    layoutd.addLayout(button_layout)
+                    dlg.setLayout(layoutd)
+                    #add gifx.gif to the dialog and show it while deleting the camera configuration from the server
+                    gif_label = QLabel()
+                    movie = QMovie("gifx.gif")
+                    gif_label.setMovie(movie)
+                    movie.start()
+                    movie.setScaledSize(QSize(20, 20))
+                    layoutd.addWidget(gif_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                    gif_label.setVisible(False)
+
+
+                    def handle_yes():
+                        #delete the camera configuration from the server
+                        stream = stream_settings[row]
+                        gif_label.setVisible(True)
+                        url = QUrl(f"https://staging-users-api.onlinemanagement.info/api/v1.1/autoGateInfo/{stream['autogateinfoid']}")
+                        request = QtNetwork.QNetworkRequest(url)
+                        token = keyring.get_password(LoginDialog.SERVICE_NAME, LoginDialog.TOKEN_KEY)
+                        if token:
+                            request.setRawHeader(b"Authorization", f"Bearer {token}".encode('utf-8'))
+                        manager = QtNetwork.QNetworkAccessManager()
+                        loop = QtCore.QEventLoop()
+                        manager.finished.connect(loop.quit)
+                        reply = manager.deleteResource(request)
+                        loop.exec()
+
+                        if reply.error() == QtNetwork.QNetworkReply.NoError:
+                            print("Camera configuration deleted successfully.")
+                            gif_label.setVisible(False)
+                            dlg.close()
+                            #show dialog box with message "Camera configuration deleted successfully" and an "OK" button to close the dialog
+                            success_dlg = QDialog(self)
+                            success_dlg.setWindowTitle("Success")
+                            success_dlg.setMinimumSize(400, 150)
+                            success_layout = QVBoxLayout()
+                            success_label = QLabel("Camera configuration deleted successfully.")
+                            success_layout.addWidget(success_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                            ok_button = QPushButton("OK")
+                            ok_button.clicked.connect(success_dlg.accept)
+                            success_layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                            success_dlg.setLayout(success_layout)
+                            success_dlg.exec()
+                            stream_settings.pop(row)
+                            update_stream_list()
+                        else:
+                            error_message = reply.errorString()
+                            print("Failed to delete camera configuration. Error:", error_message)
+                            gif_label.setVisible(False)
+                            dlg.close()
+                            #show dialog box with message "Failed to delete camera configuration" and an "OK" button to close the dialog
+                            error_dlg = QDialog(self)
+                            error_dlg.setWindowTitle("Error")
+                            error_dlg.setMinimumSize(400, 150)
+                            error_layout = QVBoxLayout()
+                            error_label = QLabel("Failed to delete camera configuration.")
+                            error_layout.addWidget(error_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                            ok_button = QPushButton("OK")
+                            ok_button.clicked.connect(error_dlg.accept)
+                            error_layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)
+                            error_dlg.setLayout(error_layout)
+                            error_dlg.exec()
+
+                    button_layout.itemAt(0).widget().clicked.connect(handle_yes)
+                    button_layout.itemAt(1).widget().clicked.connect(dlg.close)
                     dlg.exec()
                     
 
@@ -1158,6 +1327,7 @@ class MainWindow(QMainWindow):
             #save settings button to save the current stream settings to a json file
             save_settings_button = QPushButton("Save Settings")
             save_settings_button.setStyleSheet("font-weight: bold; background-color: purple; color: white;")
+            save_settings_button.setVisible(False)
             layout.addWidget(save_settings_button, 18, 1, 1, 1)
             def save_settings():
                 settings = {
@@ -1246,15 +1416,17 @@ class MainWindow(QMainWindow):
                                     try:
                                         response_json = json.loads(response)
                                         for cameraconfig in response_json:
-                                            print("AutoGate Info Response: ", cameraconfig)
+                                            #print("AutoGate Info Response: ", cameraconfig)
+                                            #print("id", cameraconfig.get('id', 'N/A'))
                                             #x = {'id': '338C3F17-C5BD-40A2-B93C-012CF0B51F4C', 'autoGateId': '56EA9E50-2AA9-43B2-8773-E74889CD4C6E', 'type': 'Device', 'infoSource': 'Intercom', 'info': None, 'name': 'rtspcamera', 'value': '{\n"CameraType": "USB",\n"CameraName": "GENERAL WEBCAM",\n"FrameRate": 30,\n"Resolution": "1280x720"\n, "RTSP": "rtsp://127.0.0.1:8554/intercom"\n}', 'extra': None, 'file': None, 'deviceShortCode': None}
                                             #CameraName
                                             cameraconfigname = json.loads(cameraconfig.get('value', '{}')).get('CameraName', 'N/A')
-                                            print(f"CamerName in value : {cameraconfigname}")
+                                            #print(f"CamerName in value : {cameraconfigname}")
 
                                             selected_camera = cameraconfigname
                                             selected_ip = json.loads(cameraconfig.get('value', '{}')).get('Selected_IP', '')
-                                            selected_frame_rate = json.loads(cameraconfig.get('value', '{}')).get('FrameRate', '')
+                                            selected_frame_rate = str(json.loads(cameraconfig.get('value', '{}')).get('FrameRate', ''))
+                                            #selected_frame_rate = '30'
                                             selected_resolution = json.loads(cameraconfig.get('value', '{}')).get('Resolution', '')
 
                                             if selected_camera in [combo.itemText(i) for i in range(combo.count())]:
@@ -1265,10 +1437,7 @@ class MainWindow(QMainWindow):
                                             elif selected_ip == localhost_ip:
                                                 public_ip_checkbox.setChecked(True)
                                             
-                                            print("A")
-                                            print(selected_frame_rate)
                                             if selected_frame_rate in [framerate_combo.itemText(i) for i in range(framerate_combo.count())]:
-                                                print(f"Setting frame rate to {selected_frame_rate} xx")
                                                 framerate_combo.setCurrentText(selected_frame_rate)
 
                                             if selected_resolution in [resolution_combo.itemText(i) for i in range(resolution_combo.count())]:
@@ -1279,9 +1448,11 @@ class MainWindow(QMainWindow):
                                                 "camera": selected_camera,
                                                 "frame_rate": selected_frame_rate,
                                                 "resolution": selected_resolution,
-                                                "custom_name": json.loads(cameraconfig.get('value', '{}')).get('CustomName', '')
+                                                "custom_name": json.loads(cameraconfig.get('value', '{}')).get('CustomName', ''),
+                                                "selected_ip": selected_ip,
+                                                "autogateinfoid": cameraconfig.get('id', '')
                                             })
-                                            print("Stream settings list after loading from autogate info: ", stream_settings)
+                                            #print("Stream settings list after loading from autogate info: ", stream_settings)
                                             update_stream_list()
                                             update_selected_settings()
                                             update_rtsp_label()
