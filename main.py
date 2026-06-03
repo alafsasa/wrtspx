@@ -968,7 +968,8 @@ class MainWindow(QMainWindow):
                 #self.p.start("ping", ["google.com"])
                 self.p.start("mediamtx.exe", ["mediamtx.yml"])
                 #wait for 500 milliseconds to allow mediamtx to start before starting ffmpeg
-                QtCore.QTimer.singleShot(500, check_mediamtx_process)
+                if keyring.get_password(LoginDialog.SERVICE_NAME, "automate_status") == "False":
+                    QtCore.QTimer.singleShot(500, check_mediamtx_process)
 
             #testbtn.clicked.connect(start_mediamtx)
             edittext = QPlainTextEdit()
@@ -1090,7 +1091,7 @@ class MainWindow(QMainWindow):
             def start_multiple_ffmpeg_processes():
                 print("Starting multiple FFmpeg processes for each stream in the stream settings list")
                 for stream in stream_settings:
-                    print(f"Starting FFmpeg for Camera: {stream['camera']}, Frame Rate: {stream['frame_rate']}, Resolution: {stream['resolution']}")
+                    #print(f"Starting FFmpeg for Camera: {stream['camera']}, Frame Rate: {stream['frame_rate']}, Resolution: {stream['resolution']}")
                     labelx = QLabel(f"Camera: {stream['camera']}, Frame Rate: {stream['frame_rate']}, Resolution: {stream['resolution']}")
                     labelx.setStyleSheet("font-weight: bold; font-size: 11px;")
                     ffmpegbox.addWidget(labelx)
@@ -1415,6 +1416,7 @@ class MainWindow(QMainWindow):
                                     response = reply.readAll().data().decode()
                                     try:
                                         response_json = json.loads(response)
+                                        wait_load_data = False
                                         for cameraconfig in response_json:
                                             #print("AutoGate Info Response: ", cameraconfig)
                                             #print("id", cameraconfig.get('id', 'N/A'))
@@ -1458,7 +1460,14 @@ class MainWindow(QMainWindow):
                                             update_rtsp_label()
                                             update_webrtc_label()
                                             edittextffmpeg.setVisible(len(stream_settings) == 0)
+                                            wait_load_data = True
 
+                                        if wait_load_data == True:
+                                            #print("DONE loading AutoGate info response: ", response_json)
+                                            #autostart mediamtx and ffmpeg if there are stream settings loaded from the autogate info
+                                            if stream_settings and keyring.get_password(LoginDialog.SERVICE_NAME, "automate_status") == "True":
+                                                start_mediamtx()
+                                                start_multiple_ffmpeg_processes()
 
 
                                     except json.JSONDecodeError:
@@ -1599,6 +1608,49 @@ class MainWindow(QMainWindow):
                 dlg.setLayout(layoutd)
                 dlg.exec()
             autogate_button.clicked.connect(configure_autogate)
+
+            #add a configure automate button
+            automate_button = QPushButton("Configure Automate")
+            automate_button.setStyleSheet("font-weight: bold; background-color: navy; color: white;")
+            layout.addWidget(automate_button, 18, 4, 1, 1)
+            def configure_automate():
+                dlg = QDialog(self)
+                dlg.setWindowTitle("Automate Configuration")
+                dlg.setMinimumSize(400, 150)
+                layoutd = QVBoxLayout()
+                label = QLabel("This is where you can configure Automate integration. This feature is coming soon!")
+                layoutd.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
+                #add button to save True for automated status and a reset button to reset it to False. Save the automated status to keyring with the key "automate_status" and the service name as defined in the LoginDialog class
+                button_layout = QHBoxLayout()
+                save_button = QPushButton("Set Automate Status to True")
+                reset_button = QPushButton("Reset Automate Status to False")
+                button_layout.addWidget(save_button)
+                button_layout.addWidget(reset_button)
+                layoutd.addLayout(button_layout)
+                def set_automate_status_true():
+                    keyring.set_password(LoginDialog.SERVICE_NAME, "automate_status", "True")
+                    automate_status_label.setText("Automate Status: True")
+                    dlg.close()
+                def reset_automate_status_false():
+                    keyring.set_password(LoginDialog.SERVICE_NAME, "automate_status", "False")
+                    automate_status_label.setText("Automate Status: False")
+                    dlg.close()
+                save_button.clicked.connect(set_automate_status_true)
+                reset_button.clicked.connect(reset_automate_status_false)
+
+                dlg.setLayout(layoutd)
+                dlg.exec()
+
+            automate_button.clicked.connect(configure_automate)
+
+            #add qlabel to show automated status
+            try:
+                automate_status = keyring.get_password(LoginDialog.SERVICE_NAME, "automate_status")
+                status_text = f"<b>Automate Status: {automate_status}</b>" if automate_status else "<b>Automate Status: Not Configured</b>"
+            except Exception:
+                status_text = "<b>Automate Status: Not Configured</b>"
+            automate_status_label = QLabel(status_text)
+            layout.addWidget(automate_status_label, 18, 5, 1, 1)
 
             #===========================================================
             #END OF WINDOWS-SPECIFIC CODE, START OF LINUX-SPECIFIC CODE
