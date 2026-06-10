@@ -224,7 +224,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Wxrtsp")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(900, 700)
         layout = QGridLayout()
         #camera and network settings label
         label1 = QLabel("Camera and Network Settings")
@@ -241,6 +241,7 @@ class MainWindow(QMainWindow):
             #START OF WINDOWS-SPECIFIC CODE
             #===========================================================
             print("Running on Windows")
+
             #add label for system os and version
             label2 = QLabel(f"System OS: {ostype} {platform.release()}")
             layout.addWidget(label2, 0, 3, 1, 4)
@@ -613,6 +614,16 @@ class MainWindow(QMainWindow):
             #layout.addWidget(stream_settings_table, 
             # 12, 0, 1, 11)
 
+            def toggle_live_status(row, status):
+                current_model = stream_settings_table.model()
+                if current_model:
+                    index = current_model.index(row, 0)
+                    widget = stream_settings_table.indexWidget(index)
+                    if widget:
+                        live_label = widget.findChild(QLabel)
+                        if live_label:
+                            live_label.setVisible(status)
+
             def update_stream_list():
                 scroll_area.setVisible(len(stream_settings) > 0)
                 for i in reversed(range(scroll_layout.count())):
@@ -645,7 +656,8 @@ class MainWindow(QMainWindow):
                     layout = QHBoxLayout(widget)
                     layout.setContentsMargins(5, 2, 5, 2)
                     edit_button = QPushButton("Edit")
-                    edit_button.setStyleSheet("padding: 1px; font-weight: bold; background-color: purple; color: white;")
+                    edit_button.setIcon(QtGui.QIcon("pencil.png"))
+                    edit_button.setStyleSheet("padding: 2px; font-weight: bold; background-color: purple; color: white;")
                     layout.addWidget(edit_button)
                     layout.setAlignment(Qt.AlignmentFlag.AlignRight)
                     stream_settings_table.setIndexWidget(model.index(row, 1), widget)
@@ -656,7 +668,8 @@ class MainWindow(QMainWindow):
                     layout2 = QHBoxLayout(widget2)
                     layout2.setContentsMargins(5, 2, 5, 2)
                     edit_button2 = QPushButton("Edit")
-                    edit_button2.setStyleSheet("padding: 1px; font-weight: bold; background-color: purple; color: white;")
+                    edit_button2.setIcon(QtGui.QIcon("pencil.png"))
+                    edit_button2.setStyleSheet("padding: 2px; font-weight: bold; background-color: purple; color: white;")
                     layout2.addWidget(edit_button2)
                     layout2.setAlignment(Qt.AlignmentFlag.AlignRight)
                     stream_settings_table.setIndexWidget(model.index(row, 2), widget2)
@@ -667,15 +680,95 @@ class MainWindow(QMainWindow):
                     stream_settings_table.setRowHeight(i, 30)
                     add_edit_button(i)
 
+                #mediamtx is running check
+                def mediamtx_process():
+                    for proc in psutil.process_iter(['name']):
+                        if proc.info['name'] and 'mediamtx' in proc.info['name'].lower():
+                            return True
+                    return False
+
+                #play button func
+                def play_button_handler(row):
+                    print("Play button clicked")
+                    keyring.set_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status", "False")
+                    print(row)
+                    #start_ffmpeg()
+                    #check if mediamtx is running
+                    if mediamtx_process():
+                        print("Mediamtx is running")
+                        #start another ffmpeg process for the stream settings in the row that the play button is clicked and use the camera configuration in the stream settings to start the ffmpeg process
+                        start_ffmpeg(row)
+                    else:
+                        print("Mediamtx is not running. Please start Mediamtx to stream the video.")
+                        start_mediamtx()
+                        start_ffmpeg(row)
+
+
+                #stop button func
+                def stop_button_handler(row):
+                    print("Stop button clicked")
+                    print(row)
+                    #check ffmpeg for streams started with the camera configuration in the stream settings
+                    for proc in psutil.process_iter(['name', 'cmdline']):
+                        if proc.info['name'] and 'ffmpeg' in proc.info['name'].lower():
+                            cmdline = ' '.join(proc.info['cmdline']).lower()
+                            stream = stream_settings[row]
+                            camera_name = stream['camera'].lower()
+                            ip_address = stream['selected_ip'].lower()
+                            custom_name = stream['custom_name'].strip().replace(' ', '_').lower()
+                            if camera_name in cmdline and ip_address in cmdline and custom_name in cmdline:
+                                print(f"Terminating ffmpeg process with PID {proc.pid} for stream: {stream}")
+                                proc.terminate()
+                                
+                
+
+                #toggle visibility of the live.gif label when play button is clicked and stop button is clicked
+                def toggle_live_status(row, status):
+                    index = model.index(row, 0)
+                    widget = stream_settings_table.indexWidget(index)
+                    if widget:
+                        live_label = widget.findChild(QLabel)
+                        if live_label:
+                            live_label.setVisible(status)
+
+                            
+
                 #delete buttons
                 for i in range(len(stream_settings)):
                     widget = QWidget()
                     layout = QHBoxLayout(widget)
                     layout.setContentsMargins(5, 2, 5, 2)
-                    delete_button = QPushButton("")
+
+                    #play video
+                    play_button = QPushButton("Play")
+                    play_button.setIcon(QtGui.QIcon("play.png"))
+                    play_button.setStyleSheet("padding: 2px; font-weight: bold; background-color: #1d73bc; color: white;")
+                    layout.addWidget(play_button)
+                    play_button.clicked.connect(lambda _, r=i: play_button_handler(r))
+
+
+                    #stop video
+                    stop_button = QPushButton("Stop")
+                    stop_button.setIcon(QtGui.QIcon("pause.png"))
+                    stop_button.setStyleSheet("padding: 2px; font-weight: bold; background-color: #1d73bc; color: white;")
+                    layout.addWidget(stop_button)
+                    stop_button.clicked.connect(lambda _, r=i: stop_button_handler(r))
+
+                    #delete camera configuration
+                    delete_button = QPushButton("Delete")
                     delete_button.setIcon(QtGui.QIcon("delete.png"))
-                    delete_button.setStyleSheet("padding: 1px; font-weight: bold;")
+                    delete_button.setStyleSheet("padding: 2px; font-weight: bold; background-color:red ; color: white;")
                     layout.addWidget(delete_button)
+
+                    #live status indicator live.gif
+                    live_label = QLabel()
+                    live_movie = QMovie("live.gif")
+                    live_movie.setScaledSize(QSize(100, 80))
+                    live_label.setMovie(live_movie)
+                    live_movie.start()
+                    layout.addWidget(live_label)
+                    live_label.setVisible(False)
+
                     layout.setAlignment(Qt.AlignmentFlag.AlignRight)
                     stream_settings_table.setIndexWidget(model.index(i, 0), widget)
                     delete_button.clicked.connect(lambda _, r=i: delete_stream_settings(r))
@@ -880,7 +973,13 @@ class MainWindow(QMainWindow):
             start_streaming_button = QPushButton("Confirm & Start RTSP Stream")
             start_streaming_button.setStyleSheet("font-weight: bold; background-color: green; color: white;")
             layout.addWidget(start_streaming_button, 13, 0, 1, 6)
+            print("Initial Start Streaming Button Status: ", keyring.get_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status"))
+            def confirm_start_button_status():
+                keyring.set_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status", "True")
+
+
             start_streaming_button.clicked.connect(lambda: start_mediamtx())
+            start_streaming_button.clicked.connect(lambda: confirm_start_button_status())
             #quit webcamtortsp button
             quit_button = QPushButton("Stop RTSP Streams")
             quit_button.setStyleSheet("font-weight: bold; background-color: red; color: white;")
@@ -969,13 +1068,14 @@ class MainWindow(QMainWindow):
                 self.p.start("mediamtx.exe", ["mediamtx.yml"])
                 #wait for 500 milliseconds to allow mediamtx to start before starting ffmpeg
                 if keyring.get_password(LoginDialog.SERVICE_NAME, "automate_status") == "False":
-                    QtCore.QTimer.singleShot(500, check_mediamtx_process)
+                    if keyring.get_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status") == "True":
+                        QtCore.QTimer.singleShot(500, check_mediamtx_process)
 
-            #testbtn.clicked.connect(start_mediamtx)
             edittext = QPlainTextEdit()
             edittext.setReadOnly(True)
             edittext.setCenterOnScroll(True)
-            #edittext.verticalScrollBar().setValue(edittext.verticalScrollBar().maximum())
+            edittext.setStyleSheet("background-color: black; color: white; font-family: Consolas, monospace;")
+            edittext.verticalScrollBar().setValue(edittext.verticalScrollBar().maximum())
             layout.addWidget(edittext, 15, 0, 1, 6)
 
             def pmessage(msg):
@@ -1002,7 +1102,23 @@ class MainWindow(QMainWindow):
             label13 = QLabel("FFmpeg Output:")
             layout.addWidget(label13, 14, 6, 1, 6)
 
-            def start_ffmpeg():
+            edittextffmpeg = QPlainTextEdit()
+            edittextffmpeg.setReadOnly(True)
+            #edittextffmpeg.setCenterOnScroll(True)
+            edittextffmpeg.setStyleSheet("background-color: black; color: white; font-family: Consolas, monospace;")
+            edittextffmpeg.verticalScrollBar().setValue(edittextffmpeg.verticalScrollBar().maximum())
+            layout.addWidget(edittextffmpeg, 15, 6, 1, 6)
+
+            #show four QplainTextEdit widget inside a QBoxLayout to show the output of the ffmpeg command for each stream added to the stream settings list. The output should show the ffmpeg command being run for each stream and any errors or output from the command. The QPlainTextEdit widgets should only be visible when there are streams in the stream settings list.
+            ffmpegbox = QVBoxLayout()
+            ffmpegbox_container = QWidget()
+            ffmpegbox_container.setLayout(ffmpegbox)
+            #ffmpegbox_container.setStyleSheet("background-color: lightgray; border: 1px solid black;")
+            ffmpegscrollarea = QScrollArea()
+            ffmpegscrollarea.setWidget(ffmpegbox_container)
+            ffmpegscrollarea.setWidgetResizable(True)
+
+            def start_ffmpeg(row):
                 selected_camera = combo.currentText()
                 if selected_camera:
                     device_path = selected_camera.split("(")[-1].strip(")")
@@ -1017,13 +1133,13 @@ class MainWindow(QMainWindow):
                 selected_frame_rate = framerate_combo.currentText()
                 selected_resolution = resolution_combo.currentText()
                 custom_name = stream_settings[-1]["custom_name"] if stream_settings else selected_camera.strip().replace(' ', '_')
+
                 print("Custom Name for Stream: ", custom_name)
-
-
                 print(f"Selected Camera: {device_path}")
                 print(f"Selected IP: {selected_ip}")
                 print(f"Selected Frame Rate: {selected_frame_rate}")
                 print(f"Selected Resolution: {selected_resolution}")
+                #print(stream_settings)
 
                 if selected_camera == "" or selected_ip == "" or selected_frame_rate == "" or selected_resolution == "":
                     dlg = QDialog(self)
@@ -1036,57 +1152,88 @@ class MainWindow(QMainWindow):
                     dlg.exec()
                     return
                 elif selected_camera and selected_ip and selected_frame_rate and selected_resolution:
-                    self.ffmpegp = QProcess()
-                    pmessageffmpeg("Starting FFmpeg process")
-                    def ffmpeg_finished():
-                        print("FFmpeg process finished")
-                        pmessageffmpeg("FFmpeg process finished")
-                        self.ffmpegp = None
-                    self.ffmpegp.readyReadStandardOutput.connect(handle_ffmpeg_stdout)
-                    self.ffmpegp.readyReadStandardError.connect(handle_ffmpeg_stderr)
-                    self.ffmpegp.stateChanged.connect(handle_ffmpeg_state)
-                    self.ffmpegp.finished.connect(ffmpeg_finished)
-                    self.ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{custom_name.replace(' ', '_')}"])
+                    print("Starting FFmpeg process")
+                    print(stream_settings[row])
+                    print(keyring.get_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status"))
+                    if(keyring.get_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status") != "True"):
+                        print("Start individual FFmpeg process without starting MediaMTX since the confirm start mediamtx status is not True")
+                        ffmpegbox.addWidget(edittextffmpeg)
+                        edittextffmpeg.setVisible(True)
 
-            edittextffmpeg = QPlainTextEdit()
-            edittextffmpeg.setReadOnly(True)
-            #edittextffmpeg.setCenterOnScroll(True)
-            edittextffmpeg.verticalScrollBar().setValue(edittextffmpeg.verticalScrollBar().maximum())
-            layout.addWidget(edittextffmpeg, 15, 6, 1, 6)
+                        ffmpegp = QProcess()
+                        pmessageffmpeg("Starting FFmpeg process")
+                        def make_ffmpeg_finished_callback(row):
+                             def ffmpeg_finished():
+                                print(f"FFmpeg process for row {row} finished")
+                                pmessageffmpeg(f"FFmpeg process for row {row} finished")
+                             return ffmpeg_finished
+                        ffmpeg_finished = make_ffmpeg_finished_callback(row)
+                        ffmpegp.readyReadStandardOutput.connect(lambda: handle_ffmpeg_stdout(ffmpegp))
+                        ffmpegp.readyReadStandardError.connect(lambda: handle_ffmpeg_stderr(ffmpegp))
+                        ffmpegp.stateChanged.connect(lambda state: handle_ffmpeg_state(state, row))
+                        ffmpegp.finished.connect(ffmpeg_finished)
+                        ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", stream_settings[row]["resolution"], "-framerate", stream_settings[row]["frame_rate"], "-i", f"video={stream_settings[row]['camera']}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{stream_settings[row]['selected_ip']}:8554/{stream_settings[row]['custom_name'].replace(' ', '_')}"])
 
-            #show four QplainTextEdit widget inside a QBoxLayout to show the output of the ffmpeg command for each stream added to the stream settings list. The output should show the ffmpeg command being run for each stream and any errors or output from the command. The QPlainTextEdit widgets should only be visible when there are streams in the stream settings list.
-            ffmpegbox = QVBoxLayout()
-            ffmpegbox_container = QWidget()
-            ffmpegbox_container.setLayout(ffmpegbox)
-            ffmpegscrollarea = QScrollArea()
-            ffmpegscrollarea.setWidget(ffmpegbox_container)
-            ffmpegscrollarea.setWidgetResizable(True)
+                    else:
+                        print("Start FFmpeg process and MediaMTX since the confirm start mediamtx status is True")
+
+                        #add edittextffmpeg to ffmpegbox layout and make it visible
+                        ffmpegbox.addWidget(edittextffmpeg)
+                        edittextffmpeg.setVisible(True)
+
+                        ffmpegp = QProcess()
+                        pmessageffmpeg("Starting FFmpeg process")
+                        def make_ffmpeg_finished_callback(row):
+                             def ffmpeg_finished():
+                                print(f"FFmpeg process for row {row} finished")
+                                pmessageffmpeg(f"FFmpeg process for row {row} finished")
+                             return ffmpeg_finished
+                        ffmpeg_finished = make_ffmpeg_finished_callback(row)
+                        ffmpegp.readyReadStandardOutput.connect(lambda: handle_ffmpeg_stdout(ffmpegp))
+                        ffmpegp.readyReadStandardError.connect(lambda: handle_ffmpeg_stderr(ffmpegp))
+                        ffmpegp.stateChanged.connect(lambda state: handle_ffmpeg_state(state, row))
+                        ffmpegp.finished.connect(ffmpeg_finished)
+                        ffmpegp.start("ffmpeg", ["-f", "dshow", "-video_size", selected_resolution, "-framerate", selected_frame_rate, "-i", f"video={selected_camera}", "-c:v", "libx264", "-b:v", "2M", "-preset", "ultrafast", "-tune", "zerolatency", "-fflags", "nobuffer", "-rtsp_transport", "udp", "-analyzeduration", "0", "-probesize", "32", "-flags", "low_delay", "-f", "rtsp", f"rtsp://{selected_ip}:8554/{custom_name.replace(' ', '_')}"])
             
             def toggle_edittextffmpeg():
                 print("Toggling FFmpeg output visibility")
-                edittextffmpeg.setVisible(len(stream_settings) > 0)
+                print(len(stream_settings))
+                #edittextffmpeg.setVisible(len(stream_settings) > 0)
+                #edittextffmpeg.setVisible(False)
                 layout.addWidget(ffmpegscrollarea, 15, 6, 1, 6)
 
             def pmessageffmpeg(msg):
                 edittextffmpeg.appendPlainText(msg)
 
-            def handle_ffmpeg_stderr():
-                if self.ffmpegp:
-                    error_output = self.ffmpegp.readAllStandardError().data().decode()
+            def handle_ffmpeg_stderr(ffmpegp):
+                if ffmpegp:
+                    error_output = ffmpegp.readAllStandardError().data().decode()
                     pmessageffmpeg(f"FFmpeg Error: {error_output}")
 
-            def handle_ffmpeg_stdout():
-                if self.ffmpegp:
-                    standard_output = self.ffmpegp.readAllStandardOutput().data().decode()
+            def handle_ffmpeg_stdout(ffmpegp):
+                if ffmpegp:
+                    standard_output = ffmpegp.readAllStandardOutput().data().decode()
                     pmessageffmpeg(f"FFmpeg Output: {standard_output}")
 
-            def handle_ffmpeg_state(state):
+            def handle_ffmpeg_state(state, row):
                 states = {
                     QProcess.NotRunning: "Not Running",
                     QProcess.Starting: "Starting",
                     QProcess.Running: "Running"
                 }
+
                 pmessageffmpeg(f"FFmpeg process state changed: {states.get(state, 'Unknown State')}")
+
+                if state == QProcess.Running:
+                    if(keyring.get_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status") != "True"):
+                        toggle_live_status(row, True)
+                    else:
+                        toggle_live_status(0, True)
+                else:
+                    if(keyring.get_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status") != "True"):
+                        toggle_live_status(row, False)
+                    else:
+                        toggle_live_status(0, False)
             
             def start_multiple_ffmpeg_processes():
                 print("Starting multiple FFmpeg processes for each stream in the stream settings list")
@@ -1137,6 +1284,32 @@ class MainWindow(QMainWindow):
                 }
                 pmessageffmpeg(f"FFmpeg process state changed: {states.get(state, 'Unknown State')}")
                 edittext.appendPlainText(f"FFmpeg process state changed: {states.get(state, 'Unknown State')}")
+                #if status is running, call toggle_live_status for the corresponding camera to show the live.gif label
+                if state == QProcess.Running:
+                    #find the camera name from the edittext widget above the current edittext widget and toggle the live status for that camera
+                    index = ffmpegbox.indexOf(edittext)
+                    if index != -1:
+                        camera_label = ffmpegbox.itemAt(index - 1).widget()
+                        camera_name = camera_label.text().split(",")[0].replace("Camera: ", "").strip()
+                        print("Camera name for toggling live status: ", camera_name)
+                        for stream in stream_settings:
+                            if stream['camera'] == camera_name:
+                                print("Toggling live status for camera: ", camera_name)
+                                toggle_live_status(stream_settings.index(stream), True)
+                #if status is not running, call toggle_live_status for the corresponding camera to hide the live.gif label
+                if state != QProcess.Running:
+                    index = ffmpegbox.indexOf(edittext)
+                    if index != -1:
+                        camera_label = ffmpegbox.itemAt(index - 1).widget()
+                        camera_name = camera_label.text().split(",")[0].replace("Camera: ", "").strip()
+                        print("Camera name for toggling live status: ", camera_name)
+                        for stream in stream_settings:
+                            if stream['camera'] == camera_name:
+                                print("Toggling live status for camera: ", camera_name)
+                                toggle_live_status(stream_settings.index(stream), False)
+
+
+
 
 
             #stop mediamtx by finding the process and killing it
@@ -1379,7 +1552,6 @@ class MainWindow(QMainWindow):
                         resolution_combo.setCurrentText(selected_resolution)
 
                     update_stream_list()
-                    #toggle_edittextffmpeg()
                     update_selected_settings()
                     update_rtsp_label()
                     update_webrtc_label()
@@ -1459,8 +1631,9 @@ class MainWindow(QMainWindow):
                                             update_selected_settings()
                                             update_rtsp_label()
                                             update_webrtc_label()
-                                            edittextffmpeg.setVisible(len(stream_settings) == 0)
+                                            #edittextffmpeg.setVisible(len(stream_settings) == 0)
                                             wait_load_data = True
+                                            toggle_edittextffmpeg()
 
                                         if wait_load_data == True:
                                             #print("DONE loading AutoGate info response: ", response_json)
@@ -1975,6 +2148,8 @@ class MainWindow(QMainWindow):
             def handle_close_event():
                 stop_ffmpeg()
                 stop_mediamtx()
+                #update keyring confirm automate status to False when the application is closed
+                keyring.set_password(LoginDialog.SERVICE_NAME, "confirm_start_mediamtx_status", "False")
 
             quit_button.clicked.connect(lambda: handle_close_event())
 
